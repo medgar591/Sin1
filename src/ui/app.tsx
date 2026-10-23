@@ -130,13 +130,12 @@ function TabBar() {
   return (
     <nav class="tabbar" aria-label="Main">
       {TABS.map(([t, l]) => (
-        <button type="button" key={t} class={`tab ${S.tab === t ? 'on' : ''}`} aria-current={S.tab === t ? 'page' : undefined} onClick={() => setTab(t)}>
+        <button type="button" key={t} class={`tab ${S.tab === t ? 'on' : ''}`} aria-current={S.tab === t ? 'page' : undefined} aria-label={t === 'inbox' && unresolved > 0 ? `${l}, ${unresolved} waiting` : undefined} onClick={() => setTab(t)}>
           <svg viewBox="0 0 24 24" aria-hidden="true">{ICON[t]}</svg>
           {l}
           {t === 'inbox' && unresolved > 0 && (
             <>
               <span class="badge" aria-hidden="true">{unresolved}</span>
-              <span class="sr-only">, {unresolved} waiting</span>
             </>
           )}
         </button>
@@ -236,7 +235,7 @@ export function App() {
     <>
       <TopBar />
       <div class="main">
-        <h1 class="sr-only">{TAB_NAME[S.tab]}</h1>
+        <h1 class="sr-only" tabIndex={-1}>{TAB_NAME[S.tab]}</h1>
         {S.tab === 'dash' && <Dashboard />}
         {S.tab === 'org' && <OrgView />}
         {S.tab === 'inbox' && <Inbox />}

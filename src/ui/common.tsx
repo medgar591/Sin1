@@ -155,6 +155,24 @@ if (typeof document !== 'undefined') {
   });
 }
 
+/** Keeps Tab and Shift+Tab cycling inside the sheet. */
+function trapTab(e: KeyboardEvent): void {
+  if (e.key !== 'Tab') return;
+  const sheet = e.currentTarget as HTMLElement;
+  const all = [...sheet.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null);
+  if (!all.length) return;
+  const first = all[0];
+  const last = all[all.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 export function Sheet({ title, children }: { title: ComponentChildren; children: ComponentChildren }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -166,13 +184,17 @@ export function Sheet({ title, children }: { title: ComponentChildren; children:
       // Deferred: the sheet's DOM is still there now, and the next sheet down must be live before focus goes back to it.
       setTimeout(() => {
         syncPageInert();
-        if (was instanceof HTMLElement && was.isConnected && !was.closest('[inert]')) was.focus();
+        // Back to the opener. If it has gone: the sheet below, else the page heading (not End month, where a second Enter would end another month).
+        const opener = was instanceof HTMLElement && was !== document.body && was.isConnected && !was.closest('[inert]') ? was : null;
+        const scrims = document.querySelectorAll('.scrim');
+        const below = scrims.length ? scrims[scrims.length - 1].querySelector<HTMLElement>('.hd .btn') : null;
+        (opener ?? below ?? document.querySelector<HTMLElement>('.main h1'))?.focus();
       }, 0);
     };
   }, []);
   return (
     <div class="scrim" onClick={(e) => e.target === e.currentTarget && closeSheet()}>
-      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={trapTab}>
         <div class="hd">
           <h2 class="grow" id={titleId}>{title}</h2>
           <button type="button" class="btn sm" ref={closeRef} onClick={closeSheet}>Close</button>

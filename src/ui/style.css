@@ -43,7 +43,7 @@ button.link { background: none; border: 0; padding: 0; margin: 0; text-align: in
 }
 
 /* shell */
-.topbar { position: sticky; top: 0; z-index: 20; background: rgba(11,14,18,.97); border-bottom: 1px solid var(--rule); padding: calc(var(--sat) + 8px) 14px 8px; }
+.topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--rule); padding: calc(var(--sat) + 8px) 14px 8px; }
 .topbar .r1 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .topbar .co { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar .r2 { display: flex; justify-content: space-between; gap: 6px; margin-top: 6px; font-size: 12px; }
@@ -289,6 +289,7 @@ label.btn:focus-within { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .preset { flex: 1; min-width: 0; flex-direction: column; gap: 2px; padding: 6px 4px; }
 .preset .label { font-size: 11px; line-height: 1.15; white-space: normal; }
 .preset.on { background: #123c43; border-color: var(--cyan); }
+.preset.on .label { color: var(--text); }
 .pickbox { margin-top: 8px; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--rule); border-radius: 6px; }
 .pickbox > div + div { margin-top: 2px; }
 .steps { padding: 8px 12px 10px; }

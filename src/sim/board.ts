@@ -340,7 +340,8 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
   // 3. Apply results.
   const lines: string[] = [];
   const q = quarterLabel(quarter.month);
-  const g = quarter.surprise === null ? 'with no guidance given' : `${quarter.surprise >= 0 ? 'beating' : 'missing'} guidance by ${Math.abs(Math.round(quarter.surprise * 100))}%`;
+  const pct = quarter.surprise === null ? 0 : Math.round(quarter.surprise * 100);
+  const g = quarter.surprise === null ? 'with no guidance given' : pct === 0 ? 'in line with guidance' : `${pct > 0 ? 'beating' : 'missing'} guidance by ${Math.abs(pct)}%`;
   lines.push(`${q}: profit ${formatZuzu(quarter.profit)}, ${g}. Board confidence ${Math.round(quarter.boardConfidenceAfter)}.`);
   if (asks.length) lines.push(`Directors' asks: ${asks.filter((a) => a.met).length} of ${asks.length} met.`);
   for (const m of motions) {

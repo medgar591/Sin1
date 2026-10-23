@@ -213,7 +213,7 @@ function OrgChart() {
   return (
     <div>
       <div class="chartkey">
-        Officers report to you.{ops && <> Divisions report to the COO{coo ? <> (<button type="button" class="link" onClick={() => openPerson(coo.id)}>{fullName(coo)}</button>)</> : ''}.</>}
+        Officers report to you.{ops && <> Divisions report to the COO{coo ? <> <span style={{ whiteSpace: 'nowrap' }}>(<button type="button" class="link" onClick={() => openPerson(coo.id)}>{fullName(coo)}</button>)</span></> : ''}.</>}
       </div>
       <div class="hint" style={{ marginBottom: '8px' }}>Dot on a face: how they see you, also written under their name. Amber edge: struggling. Red edge: in trouble or vacant. Tap a row or ▸ to fold it; › opens the unit.</div>
       <ul class="ctree top"><UnitNode u={g.units[g.rootUnitId]} rerender={rerender} /></ul>
