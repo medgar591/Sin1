@@ -31,7 +31,9 @@ decision.
 
 ## The company
 
-- A zaibatsu with a few **divisions** in different industries. Each has
+- A zaibatsu with **3 divisions** in different industries, each with 100–150
+  people, plus small corporate-function teams under the C-suite.
+- A zaibatsu's **divisions** are its business lines. Each has
   budget, revenue, costs, growth, morale and output.
 - Corp-level numbers: cash, quarterly profit, an abstract share price driven
   by profit against guidance, and **board confidence**.
@@ -57,7 +59,7 @@ The company is a tree of **org units**, each led by a person.
 - **Every unit has a lead**, a budget, a headcount, morale and output. A
   unit's output rolls up into its parent's, and divisions roll up into the
   company.
-- **Managers matter.** A unit's output depends on its lead's competence, how
+- **Managers matter.** A unit's output depends on its lead's Work skill, how
   well the lead and their reports get along, morale, budget, and infighting.
   A bad manager drags down everything under them. A feud between two team
   leads hurts the sub-division above them.
@@ -66,13 +68,22 @@ The company is a tree of **org units**, each led by a person.
 
 - Name, age, heritage (human, Green, Blighted, uplift, synth), and a generated
   portrait or icon.
-- Skills: Management, Operations, Finance and Guile.
+- Every worker is simulated as an individual person, not as headcount.
+- Skills:
+  - **Work:** how well they do their job. For a manager, it's a big part of
+    how well their unit performs.
+  - Management, Operations, Finance and Guile.
 - Personality: Loyalty (to their boss, and to you), Ambition, Greed, and two
   traits (principled, paranoid, vain, ruthless and so on).
 - Career: role, salary, satisfaction, tenure, performance, and promotion
   history.
+- **Most people are neutral.** Plenty of them just do their job. They have no
+  strong feelings, no schemes and no clique, and they only stir when something
+  happens to them.
 - **Relationships:** opinions of the people they work with, tagged as mentor,
-  protégé, rival, lover or grudge.
+  protégé, rival, lover or grudge. A relationship that skips levels has
+  pull: a worker close to a senior manager can be shielded from being fired,
+  or pulled into that manager's unit.
 - **Cliques:** informal factions that cut across the tree, backing their own
   people for promotions and leaning on whoever they can reach.
 - **Secrets:** hidden facts (embezzlement, an affair, a pre-hire past, a
@@ -89,9 +100,17 @@ You have limited **attention**: about three actions a month. You can:
   bonus pool and grant stock options.
 - **Restructure:** move units, merge or split them, or create and dissolve
   levels.
+- **Reaching down the tree:** you can act on anyone below you, not just your
+  direct reports. Going around the person who should handle it costs you
+  their loyalty, and the loyalty of those in between.
+  - **Exception:** a person who has come to your attention (a scandal, a
+    breakthrough, a viral moment) can be dealt with directly for a short
+    time without that penalty.
 - **Meet:** one-on-ones to build rapport, make promises, threaten, or probe
   for information. Promises are tracked, and breaking one costs you.
-- **Investigate:** have Security dig into someone.
+- **Investigate:** have Security dig into a person or a unit. The numbers you
+  see are accurate, but what's going on inside a unit (feuds, cliques,
+  secrets, who's really doing the work) stays hidden until someone digs.
 - **Board:** lobby individual directors.
 - **Inbox:** rule on requests and events (raise demands, feuds, accusations,
   resignations, outside offers).
@@ -138,6 +157,18 @@ The game ends if a no-confidence vote passes, or if you retire. Your score
 counts tenure, company growth and your personal fortune, adjusted by how you
 left.
 
+## Lives you changed
+
+The people in the company are meant to feel like people, not drones.
+
+- The game keeps a record of every way your decisions touched each person:
+  hired, fired, promoted, passed over, given a raise, investigated, exposed,
+  rescued, ruined.
+- When the game ends (whether you retire or are ousted), an epilogue shows
+  the people whose lives you changed the most, for better and worse. Each
+  gets a short account of what happened to them under you, and where they
+  ended up.
+
 ## Interface
 
 Built for a phone, one-handed, portrait. A dark, data-dense corporate
@@ -145,7 +176,8 @@ terminal look.
 
 - **Dashboard:** cash, profit, share price, board confidence; trend charts.
 - **Org chart:** drill down the tree from the C-suite to the workers.
-- **People:** character cards, relationships, cliques.
+- **People:** character cards, relationships, cliques, and each person's
+  history with you.
 - **Board:** directors, their agendas and the vote count.
 - **Inbox:** this month's requests and events.
 
@@ -159,9 +191,4 @@ terminal look.
 
 ## Open questions
 
-- **(open)** Are workers individual people, or headcount inside their team?
-- **(open)** Can you act directly on someone several levels down, and what
-  does skipping their bosses cost?
-- **(open)** Do you see the truth about the org, or only what your reports
-  choose to tell you?
-- **(open)** How big is the company?
+None right now.
