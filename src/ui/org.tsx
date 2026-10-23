@@ -6,7 +6,7 @@ import {
   ATTENTION_COST, createUnit, dissolveUnit, hire, investigateUnit, mergeUnits, moveUnit, setBudget, type HireTier,
 } from '../sim/actions';
 import { Bar, Btn, ConfirmBtn, KIND_LABEL, PersonLink, Seg, Sheet, Stepper, levelClass, personFlag, unitFlag, unitIntel } from './common';
-import { UnitPicker, subtreeIds } from './pickers';
+import { ALLOWED_PARENTS, UnitPicker, subtreeIds } from './pickers';
 import { closeSheet, game, openPerson, openUnit, run, setOrgUnit } from './store';
 import { S } from './store';
 
@@ -131,12 +131,16 @@ export function UnitSheet({ id }: { id: string }) {
   if (!u) return null;
   const root = u.kind === 'executive';
   const step = Math.max(5000, Math.round(u.budget * 0.1 / 5000) * 5000);
-  const kinds: [string, string][] =
-    u.kind === 'executive' ? [['function', 'Function']]
-    : u.kind === 'division' ? [['subdivision', 'Sub-division'], ['team', 'Team']]
-    : u.kind === 'subdivision' ? [['team', 'Team']]
-    : u.kind === 'team' ? [['subteam', 'Sub-team']] : [];
+  const LABELS: Record<string, string> = { function: 'Function', subdivision: 'Sub-division', team: 'Team', subteam: 'Sub-team' };
+  const takenFns = new Set(Object.values(g.units).map((x) => x.functionKind).filter(Boolean));
+  const freeFns = (['operations', 'finance', 'security', 'personnel', 'legal'] as FunctionKind[]).filter((f) => !takenFns.has(f));
+  const kinds: [string, string][] = (Object.keys(LABELS) as UnitKind[])
+    .filter((k) => ALLOWED_PARENTS[k].includes(u.kind) && (k !== 'function' || freeFns.length > 0))
+    .map((k) => [k, LABELS[k]]);
   const kind = kinds.some(([k]) => k === newKind) ? newKind : (kinds[0]?.[0] as UnitKind | undefined) ?? 'team';
+  const fnSel = freeFns.includes(fk) ? fk : freeFns[0];
+  const movable = !root && u.kind !== 'function';
+  const mergeable = !root && u.kind !== 'division' && u.kind !== 'function';
   const bad = subtreeIds(g, id);
   const tog = (m: UMode) => setMode(mode === m ? null : m);
 
@@ -147,10 +151,10 @@ export function UnitSheet({ id }: { id: string }) {
         <div class="grid2">
           <button class="btn" onClick={() => tog('budget')}>Budget</button>
           <button class="btn" onClick={() => tog('hire')}>Hire</button>
-          {!root && <button class="btn" onClick={() => tog('move')}>Move unit</button>}
-          {!root && <button class="btn" onClick={() => tog('merge')}>Merge into…</button>}
+          {movable && <button class="btn" onClick={() => tog('move')}>Move unit</button>}
+          {mergeable && <button class="btn" onClick={() => tog('merge')}>Merge into…</button>}
           {kinds.length > 0 && <button class="btn" onClick={() => tog('create')}>New sub-unit</button>}
-          {!root && u.kind !== 'division' && <button class="btn danger" onClick={() => tog('dissolve')}>Dissolve</button>}
+          {mergeable && <button class="btn danger" onClick={() => tog('dissolve')}>Dissolve</button>}
         </div>
         <Btn cls="block" cost={ATTENTION_COST.investigateUnit} onClick={() => run((s) => investigateUnit(s, id))}>Investigate unit (Security)</Btn>
 
@@ -165,37 +169,41 @@ export function UnitSheet({ id }: { id: string }) {
           <div class="card stack">
             <div class="label">Quality tier</div>
             <Seg value={tier} onChange={setTier} options={[['cheap', 'Cheap'], ['standard', 'Standard'], ['premium', 'Premium']]} />
-            {!u.leadId ? <div class="hint">The lead seat is empty.</div> : null}
-            <Seg value={asLead ? 'lead' : 'member'} onChange={(v) => setAsLead(v === 'lead')} options={[['member', 'As member'], ['lead', 'As lead']]} />
-            {asLead && u.leadId && <div class="warnbox">This will replace the sitting lead.</div>}
-            <Btn cls="primary block" cost={ATTENTION_COST.hire} onClick={() => run((s) => hire(s, id, asLead, tier))}>Hire {tier}</Btn>
+            {!u.leadId ? (
+              <>
+                <div class="hint">The lead seat is empty.</div>
+                <Seg value={asLead ? 'lead' : 'member'} onChange={(v) => setAsLead(v === 'lead')} options={[['member', 'As member'], ['lead', 'As lead']]} />
+              </>
+            ) : <div class="hint">Joins as a member; the seat is held by {g.people[u.leadId] ? fullName(g.people[u.leadId]) : 'the lead'}. To change the lead, promote someone.</div>}
+            <div class="warnbox">Hiring directly goes around the unit's leads, who lose some loyalty. Premium hires cost a recruiter fee.</div>
+            <Btn cls="primary block" cost={ATTENTION_COST.hire} onClick={() => run((s) => hire(s, id, asLead && !u.leadId, tier))}>Hire {tier}</Btn>
           </div>
         )}
         {mode === 'move' && (
           <div class="card">
             <div class="label" style={{ marginBottom: '6px' }}>Move under…</div>
-            <UnitPicker g={g} exclude={bad} onPick={(p) => { if (run((s) => moveUnit(s, id, p))) closeSheet(); }} />
-            <div class="hint">Costs {ATTENTION_COST.restructure} attention.</div>
+            <UnitPicker g={g} exclude={bad} filter={(x) => x !== u.parentId && ALLOWED_PARENTS[u.kind].includes(g.units[x].kind)} onPick={(p) => { if (run((s) => moveUnit(s, id, p))) closeSheet(); }} />
+            <div class="hint">Only compatible parents are listed. Costs {ATTENTION_COST.restructure} attention.</div>
           </div>
         )}
         {mode === 'merge' && (
           <div class="card">
             <div class="label" style={{ marginBottom: '6px' }}>Fold {u.name} into…</div>
-            <UnitPicker g={g} exclude={bad} filter={(x) => x !== g.rootUnitId} onPick={(keep) => { if (run((s) => mergeUnits(s, keep, id))) closeSheet(); }} />
+            <UnitPicker g={g} exclude={bad} filter={(x) => x !== g.rootUnitId && x !== u.parentId && u.childIds.every((c) => ALLOWED_PARENTS[g.units[c].kind].includes(g.units[x].kind))} onPick={(keep) => { if (run((s) => mergeUnits(s, keep, id))) closeSheet(); }} />
             <div class="hint">Its people and sub-units move over; its lead becomes a member. Costs {ATTENTION_COST.restructure} attention.</div>
           </div>
         )}
         {mode === 'create' && (
           <div class="card stack">
             {kinds.length > 1 && <Seg value={kind as string} onChange={(v) => setNewKind(v as UnitKind)} options={kinds} />}
-            {u.kind === 'executive' && (
-              <select value={fk} onChange={(e) => setFk(e.currentTarget.value as FunctionKind)}>
-                {(['operations', 'finance', 'security', 'personnel', 'legal'] as FunctionKind[]).map((f) => <option key={f} value={f}>{f}</option>)}
+            {kind === 'function' && (
+              <select value={fnSel} onChange={(e) => setFk(e.currentTarget.value as FunctionKind)}>
+                {freeFns.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
             )}
             <input type="text" placeholder="Unit name" value={name} onInput={(e) => setName(e.currentTarget.value)} />
             <Btn cls="primary block" cost={ATTENTION_COST.restructure} disabled={!name.trim()} onClick={() =>
-              run((s) => createUnit(s, id, kind as Exclude<UnitKind, 'executive' | 'function'> | 'function', name.trim(), u.kind === 'executive' ? fk : undefined))}>
+              run((s) => createUnit(s, id, kind as Exclude<UnitKind, 'executive' | 'function'> | 'function', name.trim(), kind === 'function' ? fnSel : undefined))}>
               Create
             </Btn>
           </div>

@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import type { Person, PersonId, PromiseKind, Skills } from '../sim/types';
-import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf } from '../sim/org';
+import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead } from '../sim/org';
 import {
   ATTENTION_COST, demote, fire, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
   type MeetingApproach, type SkipLevelInfo,
@@ -20,12 +20,17 @@ function SkipWarn({ id }: { id: PersonId }) {
   const p = g.people[id];
   if (!info) return null;
   if (info.waived) {
-    return <div class="okbox">Has your attention{p.attentionReason ? ` (${p.attentionReason})` : ''}: no skip-level penalty.</div>;
+    return <div class="okbox">On your radar{p.attentionReason ? ` (${p.attentionReason})` : ''}: no skip-level penalty.</div>;
   }
   if (info.bypassed.length === 0 || info.penalty === 0) return null;
   const names = info.bypassed.map((b) => g.people[b]?.lastName ?? '?');
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-  return <div class="warnbox">You'll go around {list}: −{info.penalty} loyalty each.</div>;
+  return (
+    <div class="warnbox">
+      Skip-level: you'll go around {list}. {names[0]} (their boss) loses {info.penalty} loyalty{names.length > 1 ? ', the others about half that' : ''}.
+      {' '}Anyone on your radar is exempt.
+    </div>
+  );
 }
 
 type Mode = null | 'meet' | 'promote' | 'reassign' | 'salary' | 'options';
@@ -47,6 +52,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
   const canAct = active && inTree && !isPlayer && p.role !== 'ceo';
   const chain = chainOfCommand(g, id);
   const intel = intelVisible(g, p);
+  const leads = isLead(g, p);
   const direct = bossOf(g, id) === g.player.personId;
   const rels = Object.entries(g.relations[id] ?? {}).filter(([o]) => g.people[o]).sort((a, b) => Math.abs(b[1].opinion) - Math.abs(a[1].opinion));
   const toYou = g.relations[id]?.[g.player.personId];
@@ -73,26 +79,6 @@ export function PersonSheet({ id }: { id: PersonId }) {
         </div>
       )}
 
-      <h2>Standing</h2>
-      <div class="stat">
-        <div><span class="label">Loyalty</span><b class={levelClass(p.loyalty, 35, 25) === 'r' ? 'red' : ''}>{Math.round(p.loyalty)}</b></div>
-        <div><span class="label">Satisf.</span><b class={levelClass(p.satisfaction) === 'r' ? 'red' : ''}>{Math.round(p.satisfaction)}</b></div>
-        <div><span class="label">Perform.</span><b class={levelClass(p.performance, 40, 30) === 'r' ? 'red' : ''}>{Math.round(p.performance)}</b></div>
-        <div><span class="label">Salary</span><b>{formatZuzu(p.salary)}</b></div>
-        <div><span class="label">Options</span><b>{p.stockOptions}</b></div>
-        <div><span class="label">Tenure</span><b>{Math.max(0, (p.leftMonth ?? g.month) - p.hiredMonth)} mo</b></div>
-      </div>
-      <h2>Skills</h2>
-      {SKILLS.map(([k, l]) => (
-        <div class="skill" key={k}>
-          <span class="dim">{l}</span><Bar value={p.skills[k]} cls={p.skills[k] < 35 ? 'a' : ''} /><span class="mono">{Math.round(p.skills[k])}</span>
-        </div>
-      ))}
-      <div style={{ marginTop: '8px' }}>
-        {p.traits.map((t) => <span key={t} class="tag cyan" style={{ marginRight: '4px' }}>{t}</span>)}
-        {intel && <span class="tag" title="ambition / greed">amb {Math.round(p.ambition)} · greed {Math.round(p.greed)}</span>}
-      </div>
-
       {canAct && (
         <>
           <h2>Actions</h2>
@@ -101,14 +87,15 @@ export function PersonSheet({ id }: { id: PersonId }) {
             <div class="grid2">
               <Btn onClick={() => tog('meet')} cost={ATTENTION_COST.meet}>Meet</Btn>
               <Btn onClick={() => tog('promote')} cost={ATTENTION_COST.promote}>Promote</Btn>
-              <Btn onClick={() => run((s) => demote(s, id))} cost={ATTENTION_COST.demote}>Demote</Btn>
-              <Btn onClick={() => tog('reassign')} cost={ATTENTION_COST.reassign}>Reassign</Btn>
+              <Btn onClick={() => run((s) => demote(s, id))} cost={ATTENTION_COST.demote} disabled={!leads} title={leads ? undefined : 'Only leads can be demoted'}>Demote</Btn>
+              <Btn onClick={() => tog('reassign')} cost={ATTENTION_COST.reassign} disabled={leads} title={leads ? 'Leads cannot be reassigned: demote or promote instead' : undefined}>Reassign</Btn>
               <Btn onClick={() => tog('salary')}>Salary</Btn>
               <Btn onClick={() => tog('options')}>Options</Btn>
               <Btn onClick={() => run((s) => investigatePerson(s, id))} cost={ATTENTION_COST.investigatePerson}>Investigate</Btn>
               <ConfirmBtn label="Fire" cls="danger" cost={ATTENTION_COST.fire} onClick={() => run((s) => fire(s, id))} />
             </div>
 
+            <div class="hint">{leads ? 'Leads can be promoted, demoted or fired, not reassigned.' : 'Reassign moves them as a member; Promote makes them a lead.'}</div>
             {mode === 'meet' && (
               <div class="card stack">
                 <Seg value={approach} onChange={setApproach} options={[['rapport', 'Rapport'], ['promise', 'Promise'], ['threaten', 'Threaten'], ['probe', 'Probe']]} />
@@ -134,14 +121,14 @@ export function PersonSheet({ id }: { id: PersonId }) {
             {mode === 'promote' && (
               <div class="card">
                 <div class="label" style={{ marginBottom: '6px' }}>Promote to lead of…</div>
-                <UnitPicker g={g} onPick={(u) => { if (run((s) => promote(s, id, u))) setMode(null); }} />
+                <UnitPicker g={g} filter={(x) => x !== g.rootUnitId && g.units[x].leadId !== id} onPick={(u) => { if (run((s) => promote(s, id, u))) setMode(null); }} />
                 <div class="hint">A sitting lead is moved down to a member.</div>
               </div>
             )}
             {mode === 'reassign' && (
               <div class="card">
                 <div class="label" style={{ marginBottom: '6px' }}>Reassign to…</div>
-                <UnitPicker g={g} onPick={(u) => { if (run((s) => reassign(s, id, u))) setMode(null); }} />
+                <UnitPicker g={g} filter={(x) => x !== g.rootUnitId && x !== p.unitId} onPick={(u) => { if (run((s) => reassign(s, id, u))) setMode(null); }} />
               </div>
             )}
             {mode === 'salary' && (
@@ -160,6 +147,26 @@ export function PersonSheet({ id }: { id: PersonId }) {
           </div>
         </>
       )}
+
+      <h2>Standing</h2>
+      <div class="stat">
+        <div><span class="label">Loyalty</span><b class={levelClass(p.loyalty, 35, 25) === 'r' ? 'red' : ''}>{Math.round(p.loyalty)}</b></div>
+        <div><span class="label">Satisf.</span><b class={levelClass(p.satisfaction) === 'r' ? 'red' : ''}>{Math.round(p.satisfaction)}</b></div>
+        <div><span class="label">Perform.</span><b class={levelClass(p.performance, 40, 30) === 'r' ? 'red' : ''}>{Math.round(p.performance)}</b></div>
+        <div><span class="label">Salary</span><b>{formatZuzu(p.salary)}</b></div>
+        <div><span class="label">Options</span><b>{p.stockOptions}</b></div>
+        <div><span class="label">Tenure</span><b>{Math.max(0, (p.leftMonth ?? g.month) - p.hiredMonth)} mo</b></div>
+      </div>
+      <h2>Skills</h2>
+      {SKILLS.map(([k, l]) => (
+        <div class="skill" key={k}>
+          <span class="dim">{l}</span><Bar value={p.skills[k]} cls={p.skills[k] < 35 ? 'a' : ''} /><span class="mono">{Math.round(p.skills[k])}</span>
+        </div>
+      ))}
+      <div style={{ marginTop: '8px' }}>
+        {p.traits.map((t) => <span key={t} class="tag cyan" style={{ marginRight: '4px' }}>{t}</span>)}
+        {intel && <span class="tag" title="ambition / greed">amb {Math.round(p.ambition)} · greed {Math.round(p.greed)}</span>}
+      </div>
 
       {promises.length > 0 && (
         <>

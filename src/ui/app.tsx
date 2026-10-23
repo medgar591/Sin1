@@ -16,6 +16,7 @@ function doEndMonth() {
   const g = S.game;
   if (!g) return;
   const meetings = g.boardMeetings.length;
+  const pending = new Set(g.fixerJobs.filter((j) => j.state === 'pending').map((j) => j.id));
   try {
     advanceMonth(g);
   } catch (e) {
@@ -26,7 +27,10 @@ function doEndMonth() {
   S.sheets = [];
   if (!g.gameOver) {
     const unresolved = g.inbox.filter((i) => i.resolution === null).length;
-    toast(`${monthLabel(g.month)}. ${unresolved ? `${unresolved} item${unresolved > 1 ? 's' : ''} in the inbox.` : 'Quiet start.'}`);
+    const reports = g.fixerJobs.filter((j) => pending.has(j.id) && j.state !== 'pending').length;
+    const bits = [`${monthLabel(g.month)}.`, unresolved ? `${unresolved} item${unresolved > 1 ? 's' : ''} in the inbox.` : 'Quiet start.'];
+    if (reports) bits.push(`${reports} fixer report${reports > 1 ? 's' : ''} in (Board tab).`);
+    toast(bits.join(' '));
     if (g.boardMeetings.length > meetings) S.sheets = [{ k: 'boardResult', index: g.boardMeetings.length - 1 }];
   }
   commit();
@@ -107,15 +111,14 @@ function BoardResult({ index }: { index: number }) {
   const m = g.boardMeetings[index];
   if (!m) return null;
   const last = g.company.history[g.company.history.length - 1];
+  const c = g.company;
   return (
     <Sheet title="Quarter closed">
-      {last && (
-        <div class="stat" style={{ marginBottom: '10px' }}>
-          <div><span class="label">Profit/mo</span><b>{formatZuzu(last.profit)}</b></div>
-          <div><span class="label">Share</span><b>{zuzuPrice(last.sharePrice)}</b></div>
-          <div><span class="label">Board</span><b>{Math.round(last.boardConfidence)}</b></div>
-        </div>
-      )}
+      <div class="stat" style={{ marginBottom: '10px' }}>
+        <div><span class="label">Last month</span><b>{last ? formatZuzu(last.profit) : '—'}</b></div>
+        <div><span class="label">Share</span><b>{zuzuPrice(c.sharePrice)}</b></div>
+        <div><span class="label">Board</span><b>{Math.round(c.boardConfidence)}</b></div>
+      </div>
       <MeetingView m={m} />
       <button class="btn primary block" onClick={closeSheet}>Continue</button>
     </Sheet>
@@ -148,7 +151,7 @@ export function App() {
       </div>
       <TabBar />
       {S.sheets.map(renderSheet)}
-      {S.toast && <div key={S.toast.id} class={`toast ${S.toast.kind === 'bad' ? 'bad' : ''}`} onClick={() => { S.toast = null; commit(); }}>{S.toast.text}</div>}
+      {S.toast && <div key={S.toast.id} role="status" class={`toast ${S.toast.kind === 'bad' ? 'bad' : ''} ${S.sheets.length ? 'top' : ''}`}>{S.toast.text}</div>}
     </>
   );
 }

@@ -11,7 +11,7 @@ function Item({ it, done }: { it: InboxItem; done?: boolean }) {
     <div class={`card ${done ? '' : 'warn'}`}>
       <div class="row" style={{ justifyContent: 'space-between' }}>
         <b>{it.title}</b>
-        <span class="mono small dim">{monthLabel(it.month)}</span>
+        <span class="mono small dim" style={{ whiteSpace: 'nowrap' }}>{monthLabel(it.month)}</span>
       </div>
       <div class="dim" style={{ margin: '6px 0' }}>{it.body}</div>
       <div>

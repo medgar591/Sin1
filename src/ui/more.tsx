@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { exportSave, importSave, saveGame } from '../save';
 import { monthLabel } from '../sim/org';
 import { retire } from '../sim/actions';
-import { Btn, ConfirmBtn, Empty, PersonChip, Seg } from './common';
+import { Btn, ConfirmBtn, Empty, PersonChip, Primer, Seg } from './common';
 import { game, run, setGame, toast } from './store';
 
 export function MoreView() {
@@ -52,12 +52,24 @@ function Settings() {
   const [err, setErr] = useState('');
   return (
     <div class="stack" style={{ marginTop: '10px' }}>
+      <div class="card">
+        <div class="label" style={{ marginBottom: '6px' }}>How a month works</div>
+        <Primer />
+      </div>
       <div class="card stack">
         <div class="label">Export save</div>
         <Btn cls="block" onClick={() => setExp(exportSave(g))}>Generate export text</Btn>
         {exp && (
           <>
             <textarea readOnly value={exp} onFocus={(e) => e.currentTarget.select()} />
+            <Btn cls="block" onClick={() => {
+              const url = URL.createObjectURL(new Blob([exp], { type: 'text/plain' }));
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `sin1-${g.seed}-${monthLabel(g.month).replace(' ', '-')}.txt`;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 2000);
+            }}>Download as file</Btn>
             <Btn cls="block" onClick={async () => {
               try { await navigator.clipboard.writeText(exp); toast('Copied to clipboard.'); } catch { toast('Copy failed: select the text and copy it manually.', 'bad'); }
             }}>Copy</Btn>

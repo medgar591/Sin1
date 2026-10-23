@@ -75,7 +75,7 @@ export function Btn({ children, onClick, cost = 0, cls = '', disabled, title }: 
 }
 
 /** Two-step button: first tap arms it, second confirms. */
-export function ConfirmBtn({ label, confirmLabel = 'Tap again to confirm', ...rest }: Omit<BtnProps, 'children'> & { label: string; confirmLabel?: string }) {
+export function ConfirmBtn({ label, confirmLabel, ...rest }: Omit<BtnProps, 'children'> & { label: string; confirmLabel?: string }) {
   const [armed, setArmed] = useState(false);
   return (
     <Btn
@@ -91,7 +91,7 @@ export function ConfirmBtn({ label, confirmLabel = 'Tap again to confirm', ...re
         }
       }}
     >
-      {armed ? confirmLabel : label}
+      {armed ? confirmLabel ?? `Tap again: ${label}` : label}
     </Btn>
   );
 }
@@ -208,4 +208,22 @@ export function unitLabel(state: GameState, id: UnitId | null): string {
 
 export function Empty({ children }: { children: ComponentChildren }) {
   return <div class="hint" style={{ padding: '14px 0' }}>{children}</div>;
+}
+
+/** Short explanation of attention and skip-level penalties; shown on first run and in Settings. */
+export function Primer() {
+  const n = S.game?.player.attentionPerMonth ?? 3;
+  return (
+    <div class="small" style={{ lineHeight: 1.5 }}>
+      <p style={{ margin: '0 0 6px' }}>
+        Each month you have <b>{n} attention</b> (the dots at the top). Meeting, hiring, firing, promoting, demoting, reassigning,
+        investigating, restructuring, lobbying and fixer jobs each cost one. Pay, options, budgets, guidance and bonuses are free.
+      </p>
+      <p style={{ margin: '0 0 6px' }}>
+        You can act on anyone, but acting on someone below your direct reports <b>goes around their bosses</b> and costs you their loyalty.
+        People who are on your radar (a scandal, a breakthrough) are exempt for a while.
+      </p>
+      <p style={{ margin: 0 }}>Unspent attention does not carry over. Tap <b>End month</b> when you are done; the board meets after every third month.</p>
+    </div>
+  );
 }

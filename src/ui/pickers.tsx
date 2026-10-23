@@ -1,7 +1,17 @@
 import { useState } from 'preact/hooks';
-import type { GameState, UnitId, PersonId } from '../sim/types';
+import type { GameState, UnitId, UnitKind, PersonId } from '../sim/types';
 import { fullName, isActive } from '../sim/org';
 import { KIND_LABEL } from './common';
+
+/** Mirrors the sim's rules for which kinds of unit may sit under which (restructure actions reject the rest). */
+export const ALLOWED_PARENTS: Record<UnitKind, UnitKind[]> = {
+  executive: [],
+  function: ['executive'],
+  division: ['executive', 'function'],
+  subdivision: ['division', 'subdivision'],
+  team: ['division', 'subdivision', 'function'],
+  subteam: ['team', 'subteam'],
+};
 
 export function flatUnits(g: GameState, exclude: Set<UnitId> = new Set()): { id: UnitId; depth: number }[] {
   const out: { id: UnitId; depth: number }[] = [];

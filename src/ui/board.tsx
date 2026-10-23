@@ -12,12 +12,19 @@ const AGENDA: Record<string, string> = {
   growth: 'Wants growth', safety: 'Wants safety', dividends: 'Wants dividends', reform: 'Wants reform', oldGuard: 'Old guard',
 };
 
+const MOTION: Record<string, string> = {
+  noConfidence: 'No confidence', replaceOfficer: 'Replace officer', cutBudget: 'Budget cut', commend: 'Commendation',
+};
+
 export function MeetingView({ m }: { m: BoardMeeting }) {
   const g = game();
+  // The summary string repeats every motion after its headline; show only the headline.
+  const cut = m.motions.length ? m.summary.indexOf(m.motions[0].summary) : -1;
+  const headline = cut > 0 ? m.summary.slice(0, cut).trim() : m.summary;
   return (
     <div class="card">
       <div class="label">Board meeting · {monthLabel(m.month)}</div>
-      <div style={{ margin: '4px 0 8px' }}>{m.summary}</div>
+      <div style={{ margin: '4px 0 8px' }}>{headline}</div>
       {m.motions.length === 0 && <div class="hint">No motions raised.</div>}
       {m.motions.map((mo) => {
         const votes = Object.entries(mo.votes);
@@ -25,8 +32,8 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
         const no = votes.filter(([, v]) => !v);
         return (
           <div key={mo.id} style={{ borderTop: '1px solid var(--rule)', padding: '8px 0' }}>
-            <div class="row"><b class="grow">{mo.summary}</b><span class={`tag ${mo.passed ? 'red' : 'green'}`}>{mo.passed ? 'passed' : 'failed'}</span></div>
-            <div class="small dim">{mo.kind} · proposed by {g.people[mo.proposerId] ? fullName(g.people[mo.proposerId]) : '?'}</div>
+            <div class="row"><b class="grow">{mo.summary}</b><span class={`tag ${mo.passed === (mo.kind === 'commend') ? 'green' : 'red'}`} style={{ flex: 'none' }}>{mo.passed ? 'passed' : 'failed'}</span></div>
+            <div class="small dim">{MOTION[mo.kind] ?? mo.kind} · proposed by {g.people[mo.proposerId] ? fullName(g.people[mo.proposerId]) : '?'}</div>
             <div class="small mono">{yes.length} for · {no.length} against</div>
             <div class="small dim">
               {votes.map(([id, v]) => `${g.people[id]?.lastName ?? '?'} ${v ? '✓' : '✗'}`).join('  ')}
@@ -105,7 +112,7 @@ function Fixer() {
       quote = budget === null ? quoteFixerJob(g, { ...req, budget: min }) : q0;
     } catch (e) { qerr = e instanceof Error ? e.message : String(e); }
   }
-  const b = budget ?? min;
+  const b = Math.max(budget ?? min, min);
   const jobs = [...g.fixerJobs].reverse();
   const target = (j: typeof jobs[number]) =>
     j.targetPersonId && g.people[j.targetPersonId] ? fullName(g.people[j.targetPersonId]) : j.targetUnitId && g.units[j.targetUnitId] ? g.units[j.targetUnitId].name : '—';
@@ -115,7 +122,7 @@ function Fixer() {
       <div class="card stack">
         <Seg value={kind} onChange={(k) => { setKind(k); setUnitId(null); setPersonId(null); setBudget(null); }} options={[['materials', 'Materials'], ['specialHire', 'Special hire'], ['dirt', 'Dirt']]} />
         <div class="hint">
-          {kind === 'materials' && 'Scarce inputs for a unit, sourced off the books. Lifts its output for a while.'}
+          {kind === 'materials' && 'Scarce inputs for a division, sourced off the books. Pick a division or one of its units.'}
           {kind === 'specialHire' && 'Extract a standout hire from elsewhere into a unit.'}
           {kind === 'dirt' && 'Find something on a person. Secrets surface in their file.'}
         </div>
@@ -124,7 +131,7 @@ function Fixer() {
             : <PersonPicker g={g} onPick={setPersonId} />
         ) : (
           unitId ? <div>Into: <b>{g.units[unitId].name}</b> <a class="link small" onClick={() => setUnitId(null)}>change</a></div>
-            : <UnitPicker g={g} onPick={setUnitId} />
+            : <UnitPicker g={g} filter={(x) => x !== g.rootUnitId && (kind !== 'materials' || !!g.divisions[x] || !!g.units[x].divisionId)} onPick={setUnitId} />
         )}
         {ready && (
           <>

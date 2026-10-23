@@ -115,6 +115,13 @@ export function Title() {
         <div class="stack">
           <div class="label">Paste exported save</div>
           <textarea value={text} onInput={(e) => setText(e.currentTarget.value)} />
+          <label class="btn block">
+            Choose a saved file…
+            <input type="file" accept=".txt,.json,text/plain" style={{ display: 'none' }} onChange={async (e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) setText(await f.text());
+            }} />
+          </label>
           {err && <div class="warnbox">{err}</div>}
           <button
             class="btn primary block"

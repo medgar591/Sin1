@@ -3,15 +3,33 @@ import type { GameState, PersonId } from '../sim/types';
 import { formatZuzu, peopleUnder, fullName, isActive } from '../sim/org';
 import { allocateBonus, ATTENTION_COST, setGuidance } from '../sim/actions';
 import { suggestedGuidance } from '../sim/economy';
-import { Bar, Btn, Sheet, Stepper, levelClass, zuzuPrice } from './common';
+import { Bar, Btn, Primer, Sheet, Stepper, levelClass, zuzuPrice } from './common';
 import { Chart } from './charts';
 import { closeSheet, game, goOrg, openPerson, openSheet, run } from './store';
+
+const TIP_KEY = 'sin1.tip.v1';
+function tipSeen(): boolean {
+  try { return localStorage.getItem(TIP_KEY) === '1'; } catch { return false; }
+}
+
+function FirstRun() {
+  const [open, setOpen] = useState(() => !tipSeen());
+  if (!open) return null;
+  return (
+    <div class="card" style={{ marginTop: '10px', borderColor: 'var(--cyan)' }}>
+      <div class="label cyan" style={{ marginBottom: '6px' }}>How a month works</div>
+      <Primer />
+      <button class="btn sm" style={{ marginTop: '10px' }} onClick={() => { try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ } setOpen(false); }}>Got it</button>
+    </div>
+  );
+}
 
 export function Dashboard() {
   const g = game();
   const h = g.company.history.slice(-24);
   return (
     <div>
+      {g.month < 3 && <FirstRun />}
       <Guidance />
       {g.company.bonusPool > 0 && (
         <div class="card warn">
@@ -94,27 +112,21 @@ function Guidance() {
   );
 }
 
-interface Cand { id: PersonId; why: string }
+interface Cand { id: PersonId; why: string; w: number }
+
+// Mirrors the sim's idea of who expects a share (officers, division heads, performers at 70+).
+const EXPECT_PERF = 70;
+const WEIGHT = { officer: 3, divisionHead: 2.5, other: 1 };
 
 function bonusCandidates(g: GameState): Cand[] {
   const out: Cand[] = [];
-  const seen = new Set<string>();
-  const add = (id: PersonId | null, why: string) => {
-    if (!id || seen.has(id) || !g.people[id] || !isActive(g.people[id]) || id === g.player.personId) return;
-    seen.add(id);
-    out.push({ id, why });
-  };
-  for (const c of g.units[g.rootUnitId].childIds) {
-    const u = g.units[c];
-    if (u.kind === 'function') add(u.leadId, 'Officer');
+  for (const p of Object.values(g.people)) {
+    if (!isActive(p) || p.unitId === null || p.id === g.player.personId) continue;
+    if (p.role === 'officer') out.push({ id: p.id, why: 'Officer', w: WEIGHT.officer });
+    else if (p.role === 'divisionHead') out.push({ id: p.id, why: 'Division head', w: WEIGHT.divisionHead });
+    else if (p.role !== 'director' && p.role !== 'chair' && p.performance >= EXPECT_PERF) out.push({ id: p.id, why: 'High performer', w: WEIGHT.other });
   }
-  for (const d of Object.values(g.divisions)) add(g.units[d.unitId]?.leadId ?? null, 'Division head');
-  Object.values(g.people)
-    .filter((p) => isActive(p) && p.unitId !== null && p.id !== g.player.personId && p.role !== 'director' && p.role !== 'chair')
-    .sort((a, b) => b.performance - a.performance)
-    .slice(0, 12)
-    .forEach((p) => add(p.id, 'Top performer'));
-  return out;
+  return out.sort((a, b) => b.w - a.w || g.people[b.id].performance - g.people[a.id].performance);
 }
 
 export function BonusSheet() {
@@ -123,24 +135,27 @@ export function BonusSheet() {
   const step = Math.max(1000, Math.round(pool / 40 / 1000) * 1000);
   const [alloc, setAlloc] = useState<Record<PersonId, number>>({});
   const cands = bonusCandidates(g);
+  const [all, setAll] = useState(false);
+  const shown = all ? cands : cands.slice(0, 14);
   const total = Object.values(alloc).reduce((a, b) => a + b, 0);
   const left = pool - total;
   return (
     <Sheet title="Allocate bonus pool">
+      <div class="hint" style={{ marginBottom: '8px' }}>Officers, division heads and high performers (70+) expect a share. Anyone left with almost nothing resents it. Fair split pays everyone their expected share, weighted by seniority. Unspent money returns to cash.</div>
       <div class="stat">
         <div><span class="label">Pool</span><b>{formatZuzu(pool)}</b></div>
         <div><span class="label">Allocated</span><b>{formatZuzu(total)}</b></div>
         <div><span class="label">Left</span><b class={left < 0 ? 'red' : ''}>{formatZuzu(left)}</b></div>
       </div>
       <div class="list" style={{ marginTop: '10px' }}>
-        {cands.map(({ id, why }) => {
+        {shown.map(({ id, why }) => {
           const p = g.people[id];
           const v = alloc[id] ?? 0;
           return (
             <div key={id} class="item" style={{ cursor: 'default', flexWrap: 'wrap' }}>
               <div class="grow" onClick={() => openPerson(id)} style={{ cursor: 'pointer' }}>
                 <div class="t">{fullName(p)}</div>
-                <div class="s">{why} · perf {Math.round(p.performance)} · loyalty {Math.round(p.loyalty)}</div>
+                <div class="s" style={{ whiteSpace: 'normal' }}>{why} · perf {Math.round(p.performance)} · loyalty {Math.round(p.loyalty)}</div>
               </div>
               <div style={{ width: '180px' }}>
                 <Stepper small value={v} step={step} min={0} max={v + Math.max(0, left)} format={formatZuzu} onChange={(n) => setAlloc({ ...alloc, [id]: n })} />
@@ -149,7 +164,15 @@ export function BonusSheet() {
           );
         })}
       </div>
-      <div style={{ marginTop: '12px' }}>
+      {cands.length > shown.length && <button class="btn block" style={{ marginTop: '8px' }} onClick={() => setAll(true)}>Show all {cands.length} who expect a share</button>}
+      <div class="grid2" style={{ marginTop: '12px' }}>
+        <button class="btn" onClick={() => {
+          const sum = cands.reduce((a, c) => a + c.w, 0);
+          setAlloc(Object.fromEntries(cands.map((c) => [c.id, Math.floor((pool * c.w) / sum / 100) * 100])));
+        }}>Fair split</button>
+        <button class="btn" onClick={() => setAlloc({})}>Clear</button>
+      </div>
+      <div style={{ marginTop: '8px' }}>
         <Btn cls="primary block" cost={ATTENTION_COST.allocateBonus} disabled={left < 0} onClick={() => { if (run((s) => allocateBonus(s, Object.fromEntries(Object.entries(alloc).filter(([, n]) => n > 0))))) closeSheet(); }}>
           Pay out {formatZuzu(total)}
         </Btn>
