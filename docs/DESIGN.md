@@ -134,6 +134,42 @@ place in the tree. They can:
 Managers make decisions too: they hire, fire and promote inside their own
 units, according to their own loyalties and judgement.
 
+## Direction
+
+The player should always know what they are trying to do this month.
+
+- **The opening briefing.** On day one the Chief of Staff introduces the
+  board, the officers (and that the COO oversees every division), the
+  officer who was passed over for the chair, and what the board expects.
+- **The agenda.** The dashboard opens with the Chief of Staff's list of what
+  needs the CEO now: plots against you, people waiting, empty seats, asks
+  that are off track, promises falling due, directors turning hostile.
+- **The quarter.** Profit so far and projected, against the guidance you
+  announced and the board's own bar, with the meeting counting down.
+- **Board asks.** Each quarter two directors (in rotation) each demand one
+  concrete thing from their agenda: revenue growth, a margin, filled seats
+  or cost control, a shake-up, or no purge of long-serving staff. They are
+  judged at the next meeting; a met ask warms that director and the board,
+  a missed one cools them. Asks often conflict, so the player picks whom
+  to please.
+
+## Face to face
+
+People talk to the CEO; the CEO is not reading a report about them.
+
+- Everyone has a generated portrait (heritage, role and mood show).
+- Inbox items are brought by a person (the subject, their boss, or the
+  officer whose job it is: Security for leaks, Finance for missing money),
+  in a voice that follows their traits.
+- Meetings play out as short scenes. Probing someone can surface gossip
+  about third parties: a plot they are near, or a rival's secret.
+- NPCs pull the CEO into their politics:
+  - **Tip-offs:** someone loyal warns the CEO about a plot, putting the
+    plotter on the radar.
+  - **Pitches:** an ambitious manager asks the CEO to back them against a
+    rival, sometimes offering dirt. Backing them is a tracked promise;
+    warning the rival makes an enemy of the pitcher.
+
 ## Quarters
 
 - Earnings are judged against the guidance you set.
@@ -189,7 +225,10 @@ Built for a phone, one-handed, portrait. A dark, data-dense corporate
 terminal look.
 
 - **Dashboard:** cash, profit, share price, board confidence; trend charts.
-- **Org chart:** drill down the tree from the C-suite to the workers.
+- **Org chart:** a tree of who reports to whom, with faces, and a
+  drill-down from the C-suite to the workers.
+- **Players:** the people who matter: the board, your reports, division
+  heads, known threats, known factions, people on your radar.
 - **People:** character cards, relationships, cliques, and each person's
   history with you.
 - **Board:** directors, their agendas and the vote count.
