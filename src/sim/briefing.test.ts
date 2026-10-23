@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { generateGame } from './generate';
 import { openingBriefing } from './briefing';
-import { activeDirectors, chiefOfStaff, fullName, functionHead } from './org';
+import { activeDirectors, chiefOfStaff, formatZuzu, fullName, functionHead } from './org';
+import { boardExpectation } from './economy';
 
 const newGame = (seed: number) =>
   generateGame(seed, { companyName: 'Briefing Combine', playerFirstName: 'Ana', playerLastName: 'Reyes', playerPronouns: 'they' });
@@ -13,7 +14,7 @@ describe('openingBriefing', () => {
       const b = openingBriefing(state);
       const text = b.paragraphs.join('\n');
       expect(b.speakerId).toBe(chiefOfStaff(state)!.id);
-      expect(b.paragraphs.length).toBeGreaterThanOrEqual(6);
+      expect(b.paragraphs.length).toBeGreaterThanOrEqual(7);
       expect(text).toContain('Ana');
       expect(text).toContain(fullName(state.people[b.speakerId!]));
       const chair = activeDirectors(state).find((d) => d.role === 'chair')!;
@@ -29,6 +30,29 @@ describe('openingBriefing', () => {
         expect(text).toContain(fullName(state.people[a.directorId]));
       }
     }
+  });
+
+  it('tells the new CEO about the predecessor and the quarter they left behind', () => {
+    for (const seed of [1, 2, 3]) {
+      const state = newGame(seed);
+      const pre = state.prequel!;
+      const old = state.people[pre.predecessorId];
+      const text = openingBriefing(state).paragraphs.join('\n');
+      expect(text).toContain(`${fullName(old)} ran the company for`);
+      expect(text).toContain('retired at the end of December');
+      expect(text).toContain('Q4 2089');
+      expect(text).toContain(formatZuzu(pre.profit));
+      expect(text).toContain(`guidance of ${formatZuzu(pre.guidance!)}`);
+      expect(text).toMatch(/beating it|missing it/);
+      expect(text).toContain(`The board now expects at least ${formatZuzu(boardExpectation(state)!)} a quarter`);
+      if (state.company.bonusPool > 0) expect(text).toContain(`${formatZuzu(state.company.bonusPool)}, was left unallocated`);
+    }
+  });
+
+  it('skips the predecessor in a game that began without one', () => {
+    const state = newGame(6);
+    delete state.prequel;
+    expect(openingBriefing(state).paragraphs.join('\n')).not.toContain('retired at the end of December');
   });
 
   it('agrees pronouns with the rival', () => {

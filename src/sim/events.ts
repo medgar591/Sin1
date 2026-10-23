@@ -891,7 +891,8 @@ function runCycle(state: GameState): void {
   addLog(state, `${monthLabel(state.month)}: ${pick(state, recession ? RECESSION_HEADLINES : BOOM_HEADLINES)} (${recession ? 'downturn' : 'boom'}, expected to last about ${months} months).`, 3);
 }
 
-function runWorldNews(state: GameState): void {
+/** Market drift, the business cycle and the month's headline. Exported for generation, which runs it for the months before the game begins. */
+export function runWorldNews(state: GameState): void {
   // Markets drift back toward the cycle's level first, so shocks fade over a few months.
   const level = cycleLevel(state);
   for (const d of Object.values(state.divisions)) {

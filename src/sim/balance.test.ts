@@ -21,6 +21,8 @@ interface Outcome {
   confMin: number;
   confAvg: number;
   confEnd: number;
+  /** Share price at the handover, which the end price is measured against. */
+  priceStart: number;
   priceEnd: number;
   cashEnd: number;
   staffEnd: number;
@@ -58,6 +60,7 @@ function play(seed: number, bot: Bot, months = MONTHS): Outcome {
     confMin: Math.min(...confs),
     confAvg: sum(confs) / confs.length,
     confEnd: state.company.boardConfidence,
+    priceStart: state.prequel?.sharePrice ?? 40,
     priceEnd: state.company.sharePrice,
     cashEnd: state.company.cash,
     staffEnd: headcount(state),
@@ -118,9 +121,9 @@ describe('balance', () => {
     expect(mean(attentive, (r) => r.confAvg)).toBeLessThan(85);
     expect(attentive.filter((r) => r.confMin < 45).length).toBeGreaterThanOrEqual(2);
     const survivors = attentive.filter((r) => !r.ousted);
-    expect(mean(survivors, (r) => r.priceEnd / 40)).toBeGreaterThan(0.7);
+    expect(mean(survivors, (r) => r.priceEnd / r.priceStart)).toBeGreaterThan(0.7);
     // One extra RNG draw a month moves this mean by ~0.25 on the same seeds, so the cap leaves room for that noise.
-    expect(mean(survivors, (r) => r.priceEnd / 40)).toBeLessThan(2.1);
+    expect(mean(survivors, (r) => r.priceEnd / r.priceStart)).toBeLessThan(2.1);
     expect(mean(survivors, (r) => r.cashEnd)).toBeLessThan(60_000_000);
     for (const r of [...passive, ...random, ...attentive]) {
       expect(r.inboxPerMonth).toBeGreaterThanOrEqual(1.5);

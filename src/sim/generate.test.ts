@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createPerson, generateGame, unitName, type NewGameOptions } from './generate';
 import { marketSalary, roleForUnitKind, salaryRange } from './roles';
-import { activeStaff, bossOf } from './org';
+import { activeStaff, bossOf, isQuarterEnd, monthLabel, quarterLabel } from './org';
+import { boardExpectation, quarterOutlook } from './economy';
 import { emptyState } from './testkit';
 
 const OPTS: NewGameOptions = {
@@ -39,14 +40,16 @@ describe('generateGame', () => {
         const u = s.units[d.unitId];
         expect(u.parentId).toBe(ops.id);
         const members = Object.values(s.people).filter((p) => p.unitId && s.units[p.unitId].divisionId === u.id);
-        expect(members.length).toBeGreaterThanOrEqual(100);
+        // Built at 100-150; a quarter of resignations can thin a division a little.
+        expect(members.length).toBeGreaterThanOrEqual(90);
         expect(members.length).toBeLessThanOrEqual(150);
         expect(bossOf(s, u.leadId!)).toBe(ops.leadId);
       }
       expect(s.directors.length).toBeGreaterThanOrEqual(5);
       expect(s.directors.length).toBeLessThanOrEqual(7);
-      expect(s.company.cash).toBe(20_000_000);
-      expect(s.log).toHaveLength(1);
+      // A quarter of dividends and wages has run since the opening 20M.
+      expect(s.company.cash).toBeGreaterThan(10_000_000);
+      expect(s.company.cash).toBeLessThan(30_000_000);
     }
   });
 
@@ -99,11 +102,12 @@ describe('generateGame', () => {
     for (const seed of SEEDS) {
       const s = generateGame(seed, OPTS);
       const cliques = Object.values(s.cliques);
+      // Three to five at the start; a quarter of company life can add one or thin a clique out.
       expect(cliques.length).toBeGreaterThanOrEqual(3);
-      expect(cliques.length).toBeLessThanOrEqual(5);
+      expect(cliques.length).toBeLessThanOrEqual(8);
       for (const c of cliques) {
-        expect(c.memberIds.length).toBeGreaterThanOrEqual(4);
-        expect(c.memberIds.length).toBeLessThanOrEqual(15);
+        expect(c.memberIds.length).toBeGreaterThanOrEqual(2);
+        expect(c.memberIds.length).toBeLessThanOrEqual(16);
         expect(c.known).toBe(false);
         for (const id of c.memberIds) expect(s.people[id].cliqueId).toBe(c.id);
       }
@@ -155,6 +159,109 @@ describe('generateGame', () => {
     const workers = activeStaff(s).filter((p) => p.role === 'worker');
     const lowInv = workers.filter((p) => p.involvement < 25).length / workers.length;
     expect(lowInv).toBeGreaterThan(0.6);
+  });
+});
+
+describe('the quarter before the game', () => {
+  it('labels months before the game began', () => {
+    expect(quarterLabel(-1)).toBe('Q4 2089');
+    expect(quarterLabel(-3)).toBe('Q4 2089');
+    expect(quarterLabel(-4)).toBe('Q3 2089');
+    expect(quarterLabel(-12)).toBe('Q1 2089');
+    expect(quarterLabel(0)).toBe('Q1 2090');
+    expect(quarterLabel(11)).toBe('Q4 2090');
+    expect(monthLabel(-1)).toBe('Dec 2089');
+    expect(isQuarterEnd(-1)).toBe(true);
+    expect(isQuarterEnd(-2)).toBe(false);
+    expect(isQuarterEnd(-3)).toBe(false);
+    expect(isQuarterEnd(-4)).toBe(true);
+    expect(isQuarterEnd(2)).toBe(true);
+    expect(isQuarterEnd(0)).toBe(false);
+  });
+
+  it('hands the player a company with a real Q4 2089 behind it', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      expect(s.month).toBe(0);
+
+      // Three monthly records, Oct to Dec 2089, and a closed quarter.
+      expect(s.company.history.map((r) => r.month)).toEqual([-3, -2, -1]);
+      const meeting = s.boardMeetings[0];
+      expect(s.boardMeetings).toHaveLength(1);
+      expect(meeting.month).toBe(-1);
+      expect(meeting.motions).toEqual([]);
+      expect(meeting.summary).toContain('Q4 2089');
+      expect(s.log.some((l) => l.month === -1 && l.text.startsWith('Q4 2089 closed'))).toBe(true);
+      expect(s.log.every((l) => l.month <= 0)).toBe(true);
+
+      // The predecessor retired; the player sits in the chair.
+      const pre = s.prequel!;
+      expect(pre).toBeDefined();
+      const old = s.people[pre.predecessorId];
+      expect(old.status).toBe('retired');
+      expect(old.unitId).toBeNull();
+      expect(old.fate).toMatch(/^Retired as CEO in Dec 2089 after \d+ years\.$/);
+      expect(old.age).toBeGreaterThanOrEqual(58);
+      expect(-old.hiredMonth).toBeGreaterThanOrEqual(6 * 12);
+      expect(meeting.summary).toContain(`${old.firstName} ${old.lastName}`);
+      const root = s.units[s.rootUnitId];
+      expect(root.leadId).toBe(s.player.personId);
+      expect(s.people[s.player.personId].unitId).toBe(root.id);
+      expect(s.people[s.player.personId].role).toBe('ceo');
+      expect(s.player.attentionLeft).toBe(s.player.attentionPerMonth);
+      expect(root.memberIds).not.toContain(old.id);
+      expect(s.unitChurn[root.id] ?? 0).toBe(0);
+      expect(s.company.boardConfidence).toBeGreaterThanOrEqual(55);
+      expect(s.company.boardConfidence).toBeLessThanOrEqual(65);
+      for (const plot of Object.values(s.plots)) expect(plot.targetId).not.toBe(old.id);
+
+      // Nothing from the predecessor's era reaches the player's desk or ledger.
+      expect(s.inbox).toHaveLength(0);
+      expect(s.incidents).toHaveLength(0);
+      expect(s.promises).toHaveLength(0);
+      expect(s.player.personalCash).toBe(2_000_000);
+      for (const p of Object.values(s.people)) expect(p.history.some((e) => e.byPlayer)).toBe(false);
+
+      // The record matches the books and feeds the board's bar.
+      expect(pre.quarterMonth).toBe(-1);
+      expect(pre.sharePrice).toBe(s.company.sharePrice);
+      expect(pre.headcount).toBe(activeStaff(s).length);
+      expect(pre.profit).toBe(s.company.history.reduce((a, r) => a + r.profit, 0));
+      expect(pre.guidance).not.toBeNull();
+      expect(s.company.guidance).toBeNull();
+      expect(boardExpectation(s)).not.toBeNull();
+      const outlook = quarterOutlook(s);
+      expect(outlook.label).toBe('Q1 2090');
+      expect(outlook.monthsIn).toBe(0);
+      expect(outlook.expectation).toBe(boardExpectation(s));
+      expect(s.asks).toHaveLength(2);
+      for (const a of s.asks) expect(a.dueMonth).toBe(2);
+
+      // The people around the chair got a first impression of the new CEO.
+      const officer = Object.values(s.units).find((u) => u.functionKind === 'finance')!.leadId!;
+      expect(s.relations[officer][s.player.personId]).toBeDefined();
+      expect(s.relations[s.player.personId][officer]).toBeDefined();
+    }
+  });
+
+  it('lets the company live in those months: the NPC world has moved', () => {
+    let hires = 0;
+    let departures = 0;
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      hires += s.log.filter((l) => l.month < 0 && / hired /.test(l.text)).length;
+      departures += Object.values(s.people).filter((p) => p.leftMonth !== null && p.leftMonth < 0 && p.id !== s.prequel!.predecessorId).length;
+      const q4 = s.log.filter((l) => l.month < 0);
+      expect(q4.length).toBeGreaterThan(4);
+    }
+    expect(hires).toBeGreaterThan(0);
+    expect(departures).toBeGreaterThan(0);
+  });
+
+  it('leaves the unallocated bonus pool for the new CEO', () => {
+    const s = generateGame(2, OPTS);
+    expect(s.company.bonusPool).toBeGreaterThan(0);
+    expect(s.log.some((l) => l.month === 0 && l.text.includes('unallocated'))).toBe(true);
   });
 });
 

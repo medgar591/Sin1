@@ -6,12 +6,15 @@ import { AGENDA_PLAIN } from './asks';
 import {
   activeDirectors,
   chiefOfStaff,
+  formatZuzu,
   fullName,
   functionHead,
   isActive,
   pronoun,
   playerPerson,
+  quarterLabel,
 } from './org';
+import { boardExpectation } from './economy';
 import { NO_CONFIDENCE_LEVEL } from './board';
 import { capitalize } from './util';
 
@@ -42,7 +45,27 @@ export function openingBriefing(state: GameState): Briefing {
       : `Welcome to the chair, ${ceo.firstName}. Your outer office is empty, so there is no one to brief you; this is what such a briefing would say.`,
   );
 
-  // 2. The board.
+  // 2. The predecessor and the quarter they leave behind, if the game began with one.
+  const pre = state.prequel;
+  const predecessor = pre ? state.people[pre.predecessorId] : undefined;
+  if (pre && predecessor) {
+    const years = Math.floor(-predecessor.hiredMonth / 12);
+    const result =
+      pre.guidance === null
+        ? 'with no guidance given'
+        : `against guidance of ${formatZuzu(pre.guidance)}, ${pre.profit >= pre.guidance ? 'beating' : 'missing'} it`;
+    const bar = boardExpectation(state);
+    let past = `${fullName(predecessor)} ran the company for ${years} years and retired at the end of December. Last quarter (${quarterLabel(pre.quarterMonth)}) the company made ${formatZuzu(pre.profit)} ${result}.`;
+    past += bar !== null
+      ? ` The board now expects at least ${formatZuzu(bar)} a quarter; that is the bar it holds you to.`
+      : ' That is the bar the board holds you to.';
+    if (state.company.bonusPool > 0) {
+      past += ` The quarter's bonus pool, ${formatZuzu(state.company.bonusPool)}, was left unallocated. It is yours to divide, and people are watching how.`;
+    }
+    out.push(past);
+  }
+
+  // 3. The board.
   const dirs = activeDirectors(state);
   const chair = dirs.find((d) => d.role === 'chair') ?? dirs[0];
   if (chair) {
@@ -53,7 +76,7 @@ export function openingBriefing(state: GameState): Briefing {
     );
   }
 
-  // 3. Structure.
+  // 4. Structure.
   const fnHeads = Object.values(state.units)
     .filter((u) => u.functionKind && u.functionKind !== 'operations')
     .map((u) => (u.leadId ? state.people[u.leadId] : undefined))
@@ -71,7 +94,7 @@ export function openingBriefing(state: GameState): Briefing {
   }
   out.push(structure);
 
-  // 4. The rival.
+  // 5. The rival.
   const rival = state.rivalId ? state.people[state.rivalId] : undefined;
   if (rival && isActive(rival)) {
     out.push(
@@ -79,7 +102,7 @@ export function openingBriefing(state: GameState): Briefing {
     );
   }
 
-  // 5. The job.
+  // 6. The job.
   const asks = (state.asks ?? []).filter((a) => a.state === 'open');
   let job = 'The job is simple to say. Grow profit every quarter, and beat the guidance you announce: the market and the board both remember a miss.';
   const named = asks
@@ -90,7 +113,7 @@ export function openingBriefing(state: GameState): Briefing {
   }
   out.push(job);
 
-  // 6. Time.
+  // 7. Time.
   out.push(
     `You have ${state.player.attentionPerMonth} attention a month, and it is the only thing in this company that cannot be bought. Spend it on people: the ones who run things, the ones who are unhappy, the ones who are quietly ambitious. Numbers follow people, not the other way round.`,
   );

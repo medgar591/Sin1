@@ -329,13 +329,14 @@ export function monthLabel(month: Month): string {
   return `${MONTHS[((month % 12) + 12) % 12]} ${2090 + Math.floor(month / 12)}`;
 }
 
+/** "Q1 2090" for month 0; months before the game began (negative) count back into 2089. */
 export function quarterLabel(month: Month): string {
-  return `Q${Math.floor((month % 12) / 3) + 1} ${2090 + Math.floor(month / 12)}`;
+  return `Q${Math.floor((((month % 12) + 12) % 12) / 3) + 1} ${2090 + Math.floor(month / 12)}`;
 }
 
 /** True when this month closes a quarter (Mar, Jun, Sep, Dec). */
 export function isQuarterEnd(month: Month): boolean {
-  return month % 3 === 2;
+  return (((month % 3) + 3) % 3) === 2;
 }
 
 /** Formats zuzu compactly, symbol after the number: 1.2Mㄓ, 340Kㄓ. */

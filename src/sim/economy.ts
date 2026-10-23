@@ -605,7 +605,7 @@ export interface QuarterOutlook {
 /** Where the current quarter stands: what is booked, where it is heading, and the bars it will be judged against. */
 export function quarterOutlook(state: GameState): QuarterOutlook {
   const hist = state.company.history;
-  const start = Math.floor(Math.max(0, state.month) / 3) * 3;
+  const start = Math.floor(state.month / 3) * 3;
   const boardMonth = start + 2;
   const booked = hist.filter((r) => r.month >= start && r.month <= boardMonth);
   const monthsIn = Math.min(3, booked.length);

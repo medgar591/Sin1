@@ -160,7 +160,7 @@ export function askProgress(state: GameState, ask: BoardAsk): AskProgress {
 
 /** The next quarter-end month strictly after `month` (month 0 is followed by month 2). */
 function nextDueMonth(month: Month): Month {
-  const gap = (2 - (month % 3) + 3) % 3;
+  const gap = (((2 - month) % 3) + 3) % 3;
   return month + (gap === 0 ? 3 : gap);
 }
 

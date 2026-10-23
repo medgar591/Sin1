@@ -32,8 +32,13 @@ function playerDisgraced(state: GameState): boolean {
   );
 }
 
+/** Where the player's tenure starts from: the handover (older saves have no prequel and start at their first month). */
 function startPrice(state: GameState): number {
-  return state.company.history[0]?.sharePrice ?? state.company.sharePrice;
+  return state.prequel?.sharePrice ?? state.company.history[0]?.sharePrice ?? state.company.sharePrice;
+}
+
+function startHeadcount(state: GameState): number {
+  return state.prequel?.headcount ?? state.company.history[0]?.headcount ?? activeStaff(state).length;
 }
 
 function fortune(state: GameState): number {
@@ -41,8 +46,7 @@ function fortune(state: GameState): number {
 }
 
 function scoreFor(state: GameState, reason: GameOverReason): number {
-  const first = state.company.history[0];
-  const startHeads = first?.headcount ?? activeStaff(state).length;
+  const startHeads = startHeadcount(state);
   const pricePct = (state.company.sharePrice / Math.max(0.01, startPrice(state)) - 1) * 100;
   const disgraced = reason === 'ousted' && playerDisgraced(state);
 

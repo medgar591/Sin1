@@ -519,6 +519,21 @@ describe('epilogue', () => {
     expect(a.state.log.at(-1)!.importance).toBe(3);
     expect(computeScore(a.state)).toBe(a.state.gameOver!.score);
   });
+  it('measures the score from the handover, not from the predecessor\'s first month', () => {
+    const mk = () => {
+      const c = smallCompany();
+      c.state.month = 40;
+      c.state.company.sharePrice = 80;
+      c.state.company.history = [{ month: -3, cash: 0, revenue: 0, costs: 0, profit: 0, sharePrice: 40, boardConfidence: 60, headcount: 3 }];
+      return c;
+    };
+    const old = mk(), withPrequel = mk();
+    withPrequel.state.prequel = { predecessorId: 'x', sharePrice: 80, headcount: 3, profit: 0, guidance: null, quarterMonth: -1 };
+    // Old saves start from their first month's price (40 to 80 is a doubling); a prequel starts from the handover (80 to 80).
+    expect(computeScore(withPrequel.state)).toBeLessThan(computeScore(old.state));
+    endGame(withPrequel.state, 'retired');
+    expect(withPrequel.state.gameOver!.summary).toContain('near where they started');
+  });
 });
 
 it('chain helper sanity', () => {

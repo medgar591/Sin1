@@ -486,6 +486,23 @@ export interface GameState {
   asks: BoardAsk[];
   /** The officer who was passed over for the CEO's chair, if known (new games only). */
   rivalId?: PersonId | null;
+  /**
+   * The quarter the company ran under the predecessor CEO before the game began
+   * (new games only). The player's score is measured from the handover.
+   */
+  prequel?: Prequel;
+}
+
+export interface Prequel {
+  predecessorId: PersonId;
+  /** Share price and headcount at the handover. */
+  sharePrice: number;
+  headcount: number;
+  /** Profit the predecessor's last quarter delivered, and the guidance it was judged against. */
+  profit: number;
+  guidance: number | null;
+  /** The month that closed that quarter. */
+  quarterMonth: Month;
 }
 
 export type AskKind = 'revenueGrowth' | 'margin' | 'fillSeats' | 'costControl' | 'shakeUp' | 'noPurge';

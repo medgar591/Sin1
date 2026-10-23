@@ -910,7 +910,8 @@ function autofillSeat(ctx: Ctx, u: OrgUnit): boolean {
   const s = ctx.s;
   const since = (s.seatVacantSince[u.id] ??= s.month);
   if (s.month - since < T.seatAutofillMonths) return false;
-  const ceo = s.people[s.player.personId];
+  // Whoever sits in the CEO's chair acts (the predecessor, while the game is being generated).
+  const ceo = s.people[unit(s, s.rootUnitId).leadId ?? s.player.personId];
   const cands = peopleUnder(s, u.id)
     .map((id) => s.people[id])
     .filter((c) => isStaff(c) && c.performance >= 40);

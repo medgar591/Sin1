@@ -1,6 +1,7 @@
 // Builds a new game: the company, its irregular org tree, every person in it,
 // the board, relationships, cliques and secrets.
 import type {
+  BoardMeeting,
   Clique,
   DirectorAgenda,
   FunctionKind,
@@ -20,9 +21,30 @@ import type {
   UnitId,
   UnitKind,
 } from './types';
-import { addLog, addSecret, bossOf, fullName, newId, peopleUnder, placeAsMember, seatLead, unit, unitsUnder } from './org';
+import {
+  activeStaff,
+  addLifeEvent,
+  addLog,
+  addSecret,
+  bossOf,
+  formatZuzu,
+  fullName,
+  headcount,
+  monthLabel,
+  newId,
+  peopleUnder,
+  placeAsMember,
+  quarterLabel,
+  removeFromCompany,
+  seatLead,
+  unit,
+  unitsUnder,
+} from './org';
 import { baseName, marketSalary, roleRank, salaryBand } from './roles';
 import { issueAsks } from './asks';
+import { closeQuarter, computeOutputs, runEconomyMonth, suggestedGuidance, type QuarterResult } from './economy';
+import { runNpcMonth } from './npc';
+import { runWorldNews } from './events';
 import { clamp } from './util';
 import { chance, gaussian, pick, randInt, random, shuffle, weightedPick } from './rng';
 import {
@@ -101,6 +123,11 @@ const MENTOR_RATE = 0.07;
 /** Base chance of a secret, scaled up by greed and guile. */
 const SECRET_BASE = 0.03;
 const SECRET_SCALE = 0.2;
+
+/** The months the company runs under the predecessor before the player takes over: one quarter, Oct to Dec 2089. */
+const PREQUEL_MONTHS = 3;
+const PREDECESSOR_AGE: [number, number] = [58, 66];
+const PREDECESSOR_TENURE_YEARS: [number, number] = [6, 12];
 
 // ---------------------------------------------------------------- people
 
@@ -737,6 +764,110 @@ function buildBoard(state: GameState, officers: Person[], divisionHeads: Person[
   mutual(state, ally.id, antagonist.id, 55, 75, 'friend');
 }
 
+// ---------------------------------------------------------------- prequel
+
+/** "beat by 3%", "missed by 3%", or "on the nose". */
+function guidanceVerdict(surprise: number): string {
+  const pct = Math.round(Math.abs(surprise) * 100);
+  return pct === 0 ? 'on the nose' : `${surprise >= 0 ? 'beat' : 'missed'} by ${pct}%`;
+}
+
+/**
+ * Runs the company for one quarter (Oct to Dec 2089) under the predecessor, so
+ * the player inherits real history: three monthly records, a closed quarter
+ * with a share price move, and an NPC world that already has a few months of
+ * hires, departures and feuds. Nothing from this era reaches the inbox, and
+ * nothing is credited to the player.
+ */
+function runPrequel(state: GameState, player: Person, predecessor: Person): QuarterResult {
+  // The CEO's pay and the dividend go to whoever holds the chair and the stake: not the player yet.
+  const personalCash = state.player.personalCash;
+  let quarter: QuarterResult | null = null;
+
+  for (let m = -PREQUEL_MONTHS; m < 0; m++) {
+    state.month = m;
+    if (m > -PREQUEL_MONTHS) runWorldNews(state);
+    runNpcMonth(state);
+    computeOutputs(state);
+    runEconomyMonth(state);
+    // The books are only open once the first month is in; the predecessor guides from that run-rate.
+    if (m === -PREQUEL_MONTHS) state.company.guidance = suggestedGuidance(state);
+    if (m === -1) quarter = closeQuarter(state);
+    state.incidents = [];
+  }
+  state.player.personalCash = personalCash;
+  if (!quarter) throw new Error('the prequel closed no quarter');
+
+  const q = quarterLabel(quarter.month);
+  const result =
+    quarter.guidance === null || quarter.surprise === null
+      ? `with no guidance given`
+      : `against guidance ${formatZuzu(quarter.guidance)} (${guidanceVerdict(quarter.surprise)})`;
+  const meeting: BoardMeeting = {
+    month: quarter.month,
+    motions: [],
+    summary: `${q}: profit ${formatZuzu(quarter.profit)} ${result}. The board accepted ${fullName(predecessor)}'s retirement and appointed ${fullName(player)}.`,
+  };
+  state.boardMeetings.push(meeting);
+  addLog(state, `Board meeting: ${meeting.summary}`, 3, [predecessor.id, player.id]);
+  return quarter;
+}
+
+/** The predecessor retires and the player takes the chair at month 0. */
+function handOver(
+  state: GameState,
+  player: Person,
+  predecessor: Person,
+  tenureYears: number,
+  quarter: QuarterResult,
+  freshConfidence: number,
+): void {
+  const rootId = state.rootUnitId;
+  const churn = state.unitChurn[rootId];
+
+  // The retirement happened in December; the player arrives in January.
+  state.month = quarter.month;
+  const fate = `Retired as CEO in ${monthLabel(state.month)} after ${tenureYears} years.`;
+  removeFromCompany(state, predecessor.id, 'retired', fate);
+  addLifeEvent(state, predecessor.id, 'retired', fate, 0, false);
+  // A planned handover is no shock to the CEO's office.
+  if (churn === undefined) delete state.unitChurn[rootId];
+  else state.unitChurn[rootId] = churn;
+  // An offer made in the last month would otherwise lapse into a defection before the new CEO could answer it.
+  for (const p of Object.values(state.people)) p.history = p.history.filter((e) => !(e.kind === 'poachOffer' && e.month >= state.month));
+
+  state.month = 0;
+  seatLead(state, rootId, player.id);
+  state.company.boardConfidence = freshConfidence;
+  for (const [plotterId, plot] of Object.entries(state.plots)) if (plot.targetId === predecessor.id) delete state.plots[plotterId];
+  state.player.attentionLeft = state.player.attentionPerMonth;
+
+  // First impressions between the new CEO and the people who now report straight in (the passed-over rival's grudge stands).
+  for (const p of activeStaff(state)) {
+    if (bossOf(state, p.id) !== player.id || state.relations[p.id]?.[player.id]) continue;
+    link(state, p.id, player.id, 12 + gaussian(state) * 18);
+    link(state, player.id, p.id, 10 + gaussian(state) * 16);
+  }
+
+  state.prequel = {
+    predecessorId: predecessor.id,
+    sharePrice: state.company.sharePrice,
+    headcount: headcount(state),
+    profit: quarter.profit,
+    guidance: quarter.guidance,
+    quarterMonth: quarter.month,
+  };
+  addLog(
+    state,
+    `${fullName(player)} takes over as CEO of ${state.company.name}. ${fullName(predecessor)} retires after ${tenureYears} years; the board expects growth.`,
+    3,
+    [player.id, predecessor.id],
+  );
+  if (state.company.bonusPool > 0) {
+    addLog(state, `${fullName(predecessor)} left the ${quarterLabel(quarter.month)} bonus pool of ${formatZuzu(state.company.bonusPool)} unallocated, for ${fullName(player)} to decide.`, 2, [predecessor.id]);
+  }
+}
+
 // ---------------------------------------------------------------- generate
 
 /** Generates a fresh game from a seed. Month 0, CEO just installed. */
@@ -789,9 +920,11 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
     asks: [],
     rivalId: null,
   };
-  state.company.boardConfidence = randInt(state, 55, 65);
+  // The board's fresh-start confidence in the new CEO; the predecessor's quarter must not move it.
+  const freshConfidence = randInt(state, 55, 65);
+  state.company.boardConfidence = freshConfidence;
 
-  // Executive office and the player.
+  // Executive office. The player is created now but only takes the chair at the handover; the predecessor sits in it until then.
   const root = newUnit(state, 'executive', null, 'Office of the CEO');
   state.rootUnitId = root.id;
   const ceo = createPerson(state, {
@@ -806,8 +939,17 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   ceo.hiredMonth = 0;
   ceo.salary = 1_200_000;
   ceo.secrets = [];
-  seatLead(state, root.id, ceo.id);
   state.player.personId = ceo.id;
+
+  const predecessor = createPerson(state, {
+    role: 'ceo',
+    heritage: 'human',
+    age: randInt(state, ...PREDECESSOR_AGE),
+  });
+  const tenureYears = randInt(state, ...PREDECESSOR_TENURE_YEARS);
+  predecessor.hiredMonth = -(tenureYears * 12 + randInt(state, 0, 11));
+  predecessor.salary = ceo.salary;
+  seatLead(state, root.id, predecessor.id);
 
   const chief = createPerson(state, { role: 'worker', quality: 62 });
   chief.title = 'Chief of Staff';
@@ -847,7 +989,8 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
     stats.revenue = Math.round(costs * (REVENUE_MARGIN[0] + random(state) * (REVENUE_MARGIN[1] - REVENUE_MARGIN[0])));
   }
 
-  const staff = Object.values(state.people).filter((p) => p.unitId !== null);
+  // Everyone seated in the company except the predecessor, who is nobody's friend, protege or clique member.
+  const staff = Object.values(state.people).filter((p) => p.unitId !== null && p.id !== predecessor.id);
   const officers = fnUnits.map((u) => state.people[u.leadId!]);
   const divisionHeads = divisionUnits.map((u) => state.people[u.leadId!]);
 
@@ -867,12 +1010,8 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   assignSecrets(state, staff);
   buildCliques(state, staff, antagonist);
 
-  addLog(
-    state,
-    `${fullName(ceo)} takes over as CEO of ${opts.companyName}. The board expects growth.`,
-    2,
-    [ceo.id],
-  );
+  const quarter = runPrequel(state, ceo, predecessor);
+  handOver(state, ceo, predecessor, tenureYears, quarter, freshConfidence);
   issueAsks(state);
   return state;
 }
