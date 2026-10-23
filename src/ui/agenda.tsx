@@ -2,7 +2,7 @@
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import type { GameState, PersonId } from '../sim/types';
-import { secretary, formatZuzu, fullName, isActive, monthLabel } from '../sim/org';
+import { secretary, formatZuzu, fullName, isActive, monthLabel, shortName } from '../sim/org';
 import { askProgress } from '../sim/asks';
 import { directorSupport } from '../sim/board';
 import { quarterOutlook, suggestedGuidance, type QuarterOutlook } from '../sim/economy';
@@ -69,7 +69,7 @@ export function buildAgenda(g: GameState): AgendaItem[] {
     if (a.state !== 'open' || !g.people[a.directorId]) continue;
     const pr = askProgress(g, a);
     if (pr.met) continue;
-    out.push({ key: `ask${a.id}`, tone: 1, who: a.directorId, go: () => setTab('board'), text: <><b>{g.people[a.directorId].lastName}</b> wants: {a.text}</>, sub: `So far: ${pr.label}` });
+    out.push({ key: `ask${a.id}`, tone: 1, who: a.directorId, go: () => setTab('board'), text: <><b>{shortName(g.people[a.directorId])}</b> wants: {a.text}</>, sub: `So far: ${pr.label}` });
   }
 
   if (g.company.bonusPool > 0) {

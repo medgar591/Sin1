@@ -43,6 +43,7 @@ import {
   unitsUnder,
   verb,
   be,
+  shortName,
 } from './org';
 import { ALLOWED_PARENTS, marketSalary, roleForUnitKind, roleRank } from './roles';
 import { chance, pick, randInt } from './rng';
@@ -183,7 +184,7 @@ function applySkip(state: GameState, groups: PersonId[][], targetId: PersonId | 
     if (!m || !isActive(m)) continue;
     adjustLoyalty(state, id, -Math.round(w * strength));
     adjustOpinion(state, id, state.player.personId, -Math.round((w * strength) / 2));
-    names.push(m.lastName);
+    names.push(shortName(m));
     lastObj = pronoun(m, 'object');
   }
   if (names.length === 0) return '';
@@ -273,7 +274,7 @@ export function fire(state: GameState, personId: PersonId): ActionResult {
     }
     boardNote = ` The board ${cause ? 'accepts the cause shown' : 'is unsettled'}${upset ? `; ${upset} director${upset === 1 ? '' : 's'} close to ${pronoun(p, 'object')} took it badly` : ''}.`;
   }
-  const angry = protectors.length ? ` ${state.people[protectors[0]].lastName}, who backed ${pronoun(p, 'object')}, took it badly.` : '';
+  const angry = protectors.length ? ` ${shortName(state.people[protectors[0]])}, who backed ${pronoun(p, 'object')}, took it badly.` : '';
   return ok(`Fired ${fullName(p)}. Severance ${formatZuzu(severance)}.${angry}${boardNote}${skip}`);
 }
 
@@ -310,7 +311,7 @@ export function promote(state: GameState, personId: PersonId, unitId: UnitId): A
     adjustOpinion(state, displaced.id, state.player.personId, -15);
     addLifeEvent(state, displaced.id, 'demoted', `Replaced as lead of ${u.name} by ${fullName(p)} and kept on as staff.`, -5, true);
     ripple(state, displaced.id, -4, -2);
-    note = ` ${displaced.lastName} stays on as staff and will resent it.`;
+    note = ` ${shortName(displaced)} stays on as staff and will resent it.`;
   }
   resentPassedOver(state, u, [personId, displaced?.id ?? '']);
   ripple(state, personId, 3);
@@ -509,7 +510,7 @@ export function setBudget(state: GameState, unitId: UnitId, budget: number): Act
     if (swing !== 0) adjustLoyalty(state, lead.id, Math.round(swing / 3));
   }
   addLog(state, `${u.name} budget set to ${formatZuzu(budget)} a month.`, 1, lead ? [lead.id] : []);
-  return ok(`${u.name} budget is now ${formatZuzu(budget)} a month${lead ? ` (was ${formatZuzu(old)}); ${lead.lastName} noticed` : ''}.`);
+  return ok(`${u.name} budget is now ${formatZuzu(budget)} a month${lead ? ` (was ${formatZuzu(old)}); ${shortName(lead)} noticed` : ''}.`);
 }
 
 // ---- Restructuring ----
@@ -608,7 +609,7 @@ export function mergeUnits(state: GameState, keepId: UnitId, absorbId: UnitId): 
   delete state.units[absorbId];
   lowerBy(state, keepLead, 3, 0);
   addLog(state, `Merged ${absorb.name} into ${keep.name}.`, 2, lead ? [lead.id] : []);
-  return ok(`${absorb.name} is now part of ${keep.name}.${lead ? ` ${lead.lastName} lost ${pronoun(lead, 'possessive')} seat.` : ''}`);
+  return ok(`${absorb.name} is now part of ${keep.name}.${lead ? ` ${shortName(lead)} lost ${pronoun(lead, 'possessive')} seat.` : ''}`);
 }
 
 /** Creates an empty unit under a parent. */
@@ -909,7 +910,7 @@ export function investigatePerson(state: GameState, personId: PersonId): ActionR
   const body = found.length
     ? `${found.length === 1 ? 'a secret' : `${found.length} secrets`}: ${found.map((s) => s.description).join('; ')}`
     : 'nothing damaging';
-  return ok(`${head.lastName}'s team found ${body} on ${fullName(p)}.${saw ? ` ${capitalize(pronoun(p, 'subject'))} noticed.` : ''}`);
+  return ok(`${shortName(head)}'s team found ${body} on ${fullName(p)}.${saw ? ` ${capitalize(pronoun(p, 'subject'))} noticed.` : ''}`);
 }
 
 /** Security digs into a unit: reveals feuds, cliques and who really does the work there. */
@@ -942,7 +943,7 @@ export function investigateUnit(state: GameState, unitId: UnitId): ActionResult 
   const star = workers.sort((a, b) => b.performance - a.performance)[0];
   addLog(state, `${fullName(head)} investigated ${u.name}.`, 2, [head.id]);
   const parts = [`${secrets} secret${secrets === 1 ? '' : 's'}`, `${feuds} feud${feuds === 1 ? '' : 's'}`, `${cliques.length} clique${cliques.length === 1 ? '' : 's'}`];
-  return ok(`${head.lastName}'s review of ${u.name} turned up ${parts.join(', ')}.${star ? ` Most of the real work comes from ${fullName(star)}.` : ''}${noticedBy ? ` ${noticedBy} noticed the digging.` : ''}`);
+  return ok(`${shortName(head)}'s review of ${u.name} turned up ${parts.join(', ')}.${star ? ` Most of the real work comes from ${fullName(star)}.` : ''}${noticedBy ? ` ${noticedBy} noticed the digging.` : ''}`);
 }
 
 // ---- Board ----

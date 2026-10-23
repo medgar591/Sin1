@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import type { BoardAsk, BoardMeeting, FixerKind } from '../sim/types';
-import { fullName, formatZuzu, monthLabel } from '../sim/org';
+import { fullName, formatZuzu, monthLabel, shortName } from '../sim/org';
 import { lobbyDirector } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
 import { directorSupport } from '../sim/board';
@@ -61,7 +61,7 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
           {m.asks.map((a, i) => (
             <div key={i} class="row" style={{ alignItems: 'flex-start', margin: '4px 0' }}>
               <span class={`tag ${a.met ? 'green' : 'red'}`} style={{ flex: 'none' }}>{a.met ? '✓ met' : '✗ missed'}</span>
-              <div class="grow small"><b>{g.people[a.directorId]?.lastName ?? '?'}</b>: {a.text}</div>
+              <div class="grow small"><b>{g.people[a.directorId] ? shortName(g.people[a.directorId]) : '?'}</b>: {a.text}</div>
             </div>
           ))}
         </div>
@@ -77,7 +77,7 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
             <div class="small dim">{MOTION[mo.kind] ?? mo.kind} · proposed by {g.people[mo.proposerId] ? fullName(g.people[mo.proposerId]) : '?'}</div>
             <div class="small mono">{yes.length} for · {no.length} against</div>
             <div class="small dim">
-              {votes.map(([id, v]) => `${g.people[id]?.lastName ?? '?'} ${v ? '✓' : '✗'}`).join('  ')}
+              {votes.map(([id, v]) => `${g.people[id] ? shortName(g.people[id]) : '?'} ${v ? '✓' : '✗'}`).join('  ')}
             </div>
           </div>
         );
@@ -117,7 +117,7 @@ export function BoardView() {
                     <div class="small dim">support</div>
                   </div>
                 </div>
-                <div class="small" style={{ margin: '8px 0 6px', color: 'var(--text)', opacity: 0.85 }}>{p.lastName} {AGENDA_PLAIN[d.agenda] ?? ''}.</div>
+                <div class="small" style={{ margin: '8px 0 6px', color: 'var(--text)', opacity: 0.85 }}>{shortName(p)} {AGENDA_PLAIN[d.agenda] ?? ''}.</div>
                 {ask && pr && (
                   <div class="askbox" style={{ marginBottom: '8px' }}>
                     <div class="row" style={{ alignItems: 'flex-start' }}>

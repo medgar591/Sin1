@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import type { Person, PersonId, PromiseKind, Skills } from '../sim/types';
-import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead, isDirector } from '../sim/org';
+import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead, isDirector, shortName } from '../sim/org';
 import {
   demote, fire, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
   type MeetingApproach, type SkipLevelInfo,
@@ -25,7 +25,7 @@ function SkipWarn({ id }: { id: PersonId }) {
     return <div class="okbox">On your radar{p.attentionReason ? ` (${p.attentionReason})` : ''}: no skip-level penalty.</div>;
   }
   if (info.bypassed.length === 0 || info.penalty === 0) return null;
-  const parts = info.bypassed.map((b, i) => `${g.people[b]?.lastName ?? '?'} −${info!.penalties?.[i] ?? info!.penalty}`);
+  const parts = info.bypassed.map((b, i) => `${g.people[b] ? shortName(g.people[b]) : '?'} −${info!.penalties?.[i] ?? info!.penalty}`);
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
   return (
     <div class="warnbox">

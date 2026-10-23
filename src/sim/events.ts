@@ -48,6 +48,7 @@ import {
   setTag,
   unit,
   verb,
+  shortName,
 } from './org';
 import { isTeam, roleRank, salaryBand } from './roles';
 import { capitalize, clamp, fail, ok, roundTo } from './util';
@@ -646,7 +647,7 @@ const voices: Partial<Record<InboxKind, Voice>> = {
     const p = at(state, d, 0);
     return p && {
       speaker: functionHead(state, 'legal') ?? secretary(state),
-      lines: [`The ${p.lastName} story will be in the feeds by morning. We need a line.`, `Everyone on the floor is talking about ${fullName(p)}. Decide before the press does.`],
+      lines: [`The ${shortName(p)} story will be in the feeds by morning. We need a line.`, `Everyone on the floor is talking about ${fullName(p)}. Decide before the press does.`],
     };
   },
   breakthrough: (state, d) => {

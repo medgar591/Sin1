@@ -34,6 +34,8 @@ export function unit(state: GameState, id: UnitId): OrgUnit {
 }
 
 export const fullName = (p: Person): string => `${p.firstName} ${p.lastName}`;
+/** How a name reads on second mention: the surname, or a synth's designation (synths carry "(synth)" as a surname). */
+export const shortName = (p: Person): string => (p.lastName === '(synth)' ? p.firstName : p.lastName);
 
 export function pronoun(p: Person, form: 'subject' | 'object' | 'possessive'): string {
   const table = {
