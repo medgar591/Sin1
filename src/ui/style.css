@@ -306,3 +306,28 @@ label.btn:focus-within { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .inshort { margin: 4px 0 12px; padding: 10px 12px; background: #0e1d20; border: 1px solid #1f5b63; border-radius: 6px; }
 .inshort ul { margin: 6px 0 0; padding-left: 18px; }
 .inshort li + li { margin-top: 4px; }
+
+/* month-end feedback loop */
+.kvbtn { background: none; border: 0; padding: 0 4px; margin: -8px -4px; min-height: 44px; justify-content: center; text-align: left; color: inherit; cursor: pointer; }
+.kvbtn b { display: inline-block; }
+.bfloor { margin-left: 5px; font-size: 11px; color: var(--dim); }
+.bmeter { position: relative; display: block; width: 100%; max-width: 54px; height: 4px; margin-top: 3px; background: #1b232b; border-radius: 2px; }
+.bmeter > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--dim); border-radius: 2px; }
+.bmeter > u { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--red); text-decoration: none; }
+.item.todo { cursor: default; align-items: flex-start; padding: 10px 12px; }
+.item.todo:active { background: none; }
+.item.todo .btn { flex: none; }
+.rvrows { border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); margin-bottom: 10px; }
+.rvrow { display: grid; grid-template-columns: 92px 1fr; gap: 0 10px; align-items: baseline; padding: 7px 12px; border-top: 1px solid var(--rule); }
+.rvrow:first-child { border-top: 0; }
+.rvval { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; }
+.rvval .v { font-size: 14px; font-weight: 600; }
+.rvval .btn { margin: -4px 0; }
+.rvnote { flex-basis: 100%; }
+.rvlog { margin-top: 0; padding: 6px 0; font-size: 13px; line-height: 1.35; }
+.rvnext { margin-top: 10px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.rvline { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 13px; }
+.rvline .btn { flex: none; }
+.rvfoot { position: sticky; bottom: calc(-24px - var(--sab)); margin: 10px 0 calc(-24px - var(--sab)); padding: 8px 0 calc(24px + var(--sab)); background: #0f1419; border-top: 1px solid var(--rule); }
+.deltas { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: -6px 0 16px; }
+.delta { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; background: var(--panel2); border: 1px solid var(--rule); border-radius: 14px; font-size: 13px; }

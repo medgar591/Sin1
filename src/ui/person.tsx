@@ -78,7 +78,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
         <div class="grow">
           <div class="pname">{fullName(p)}</div>
           <div class="small">{p.title}{p.status !== 'active' && <> · <span class="red">{p.status}</span></>}</div>
-          {unit && <div class="small"><a class="link" onClick={() => goOrg(unit.id)}>{unitLabel(g, unit.id)}</a></div>}
+          {unit && <div class="small"><button type="button" class="link" onClick={() => goOrg(unit.id)}>{unitLabel(g, unit.id)}</button></div>}
           <div class="small dim">{p.pronouns} · age {p.age} · {p.heritage} · hired {monthLabel(p.hiredMonth)}</div>
         </div>
       </div>
@@ -121,7 +121,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
                 {approach === 'promise' && (
                   <>
                     <Seg value={pk} onChange={setPk} options={[['raise', 'Raise'], ['promotion', 'Promotion'], ['protection', 'Protect'], ['budget', 'Budget']]} />
-                    <input type="text" placeholder="Detail (optional)" value={detail} onInput={(e) => setDetail(e.currentTarget.value)} />
+                    <input type="text" aria-label="Promise detail" placeholder="Detail (optional)" value={detail} onInput={(e) => setDetail(e.currentTarget.value)} />
                     <Stepper value={months} step={1} min={1} max={24} format={(n) => `within ${n} mo`} onChange={setMonths} />
                   </>
                 )}
@@ -230,7 +230,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
       ) : (
         <div class="unknown">
           Unknown. Relationships, cliques and secrets are hidden until Security investigates {p.firstName}
-          {unit && <> or <a class="link" onClick={() => openUnit(unit.id)}>their unit</a></>}.
+          {unit && <> or <button type="button" class="link" onClick={() => openUnit(unit.id)}>their unit</button></>}.
         </div>
       )}
 

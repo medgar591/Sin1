@@ -9,7 +9,7 @@ import { quoteFixerJob, startFixerJob, type FixerQuote, type FixerRequest } from
 import { Btn, ConfirmBtn, DivBar, Empty, PersonChip, PersonLink, Seg, signed, pct } from './common';
 import { PersonPicker, UnitPicker } from './pickers';
 import { Portrait } from './portrait';
-import { game, openPerson, run } from './store';
+import { game, openPerson, run, setTab } from './store';
 
 const AGENDA: Record<string, string> = {
   growth: 'Wants growth', safety: 'Wants safety', dividends: 'Wants dividends', reform: 'Wants reform', oldGuard: 'Old guard',
@@ -169,9 +169,22 @@ function Lobby({ id }: { id: string }) {
   );
 }
 
+/** The sub-view the Board tab opens on next; it reverts to the directors after. */
+let openOn: 'board' | 'fixer' = 'board';
+
+/** Goes to the Board tab's fixer jobs (where reports land). */
+export function showFixerJobs(): void {
+  openOn = 'fixer';
+  setTab('board');
+}
+
 export function BoardView() {
   const g = game();
-  const [sub, setSub] = useState<'board' | 'fixer'>('board');
+  const [sub, setSub] = useState<'board' | 'fixer'>(() => {
+    const first = openOn;
+    openOn = 'board';
+    return first;
+  });
   return (
     <div>
       <div style={{ margin: '12px 0 4px' }}>
