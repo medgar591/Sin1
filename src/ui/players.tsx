@@ -25,7 +25,7 @@ function Row({ id, sub, right }: { id: PersonId; sub: ComponentChildren; right?:
   const p = game().people[id];
   if (!p) return null;
   return (
-    <button class="item" onClick={() => openPerson(id)}>
+    <button type="button" class="item" onClick={() => openPerson(id)}>
       <Portrait id={id} size={32} />
       <div class="grow">
         <div class="t">{fullName(p)}</div>
@@ -132,12 +132,12 @@ function Threats() {
         return (
           <div key={pid} class="card bad">
             <div class="plotline">
-              <button class="pl" onClick={() => openPerson(pid)}>
+              <button type="button" class="pl" onClick={() => openPerson(pid)}>
                 <Portrait id={pid} size={40} ring="var(--red)" />
                 <span class="t">{fullName(who)}</span>
               </button>
-              <span class="arrow">→</span>
-              <button class="pl" onClick={() => openPerson(tgt.id)}>
+              <span class="arrow" aria-hidden="true">→</span>
+              <button type="button" class="pl" onClick={() => openPerson(tgt.id)}>
                 <Portrait id={tgt.id} size={40} ring={tgt.id === me ? 'var(--cyan)' : undefined} />
                 <span class="t">{tgt.id === me ? 'You' : fullName(tgt)}</span>
               </button>
@@ -166,13 +166,17 @@ function Factions() {
             <div class="row"><span class="tag amber">faction</span><b class="grow clip">{c.name}</b><span class="mono small dim">{members.length}</span></div>
             <div class="small dim" style={{ margin: '4px 0 8px' }}>{c.agenda}</div>
             {leader && (
-              <button class="pbadge tap" onClick={() => openPerson(leader.id)}>
+              <button type="button" class="pbadge tap" onClick={() => openPerson(leader.id)}>
                 <Portrait id={leader.id} size={28} />
                 <span class="grow"><span class="t">{fullName(leader)}</span><span class="s">Leader · {leader.title}</span></span>
               </button>
             )}
             <div class="faces">
-              {members.slice(0, 8).map((m) => <Portrait key={m} id={m} size={30} onClick={() => openPerson(m)} />)}
+              {members.slice(0, 8).map((m) => (
+                <button key={m} type="button" aria-label={fullName(g.people[m]!)} onClick={() => openPerson(m)}>
+                  <Portrait id={m} size={30} />
+                </button>
+              ))}
               {members.length > 8 && <span class="mono small dim">+{members.length - 8}</span>}
             </div>
           </div>
@@ -202,14 +206,17 @@ function Promises() {
   return (
     <Group title="Your promises" count={open.length} hint="You owe nobody anything. Promises made in meetings are tracked here; breaking one costs you.">
       <div class="list">
-        {open.map((x) => (
-          <Row
-            key={x.id}
-            id={x.personId}
-            sub={<>{x.kind}: {x.detail}</>}
-            right={<span class={`mono small ${x.dueMonth <= g.month + 1 ? 'amber' : 'dim'}`}>due {monthLabel(x.dueMonth)}</span>}
-          />
-        ))}
+        {open.map((x) => {
+          const soon = x.dueMonth <= g.month + 1;
+          return (
+            <Row
+              key={x.id}
+              id={x.personId}
+              sub={<>{x.kind}: {x.detail}</>}
+              right={<span class={`mono small ${soon ? 'amber' : 'dim'}`}>due {monthLabel(x.dueMonth)}{soon ? ' · soon' : ''}</span>}
+            />
+          );
+        })}
       </div>
     </Group>
   );

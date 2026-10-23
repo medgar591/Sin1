@@ -34,13 +34,17 @@ function LogView() {
             <span class={`mark ${l.importance === 3 ? 'm2' : l.importance === 2 ? 'm1' : ''}`} style={{ minHeight: '24px' }} />
             <div class="grow">
               <div class="small mono dim">{monthLabel(l.month)}</div>
-              <div style={{ fontWeight: l.importance === 3 ? 600 : 400 }}>{l.text}</div>
+              <div style={{ fontWeight: l.importance === 3 ? 600 : 400 }}>
+                {l.importance === 3 && <span class="sr-only">Major: </span>}
+                {l.importance === 2 && <span class="sr-only">Notable: </span>}
+                {l.text}
+              </div>
               <div style={{ marginTop: '4px' }}>{l.personIds.slice(0, 4).map((id) => <PersonChip key={id} id={id} />)}</div>
             </div>
           </div>
         ))}
       </div>
-      {rows.length > n && <button class="btn block" style={{ marginTop: '8px' }} onClick={() => setN(n + 60)}>Older…</button>}
+      {rows.length > n && <button type="button" class="btn block" style={{ marginTop: '8px' }} onClick={() => setN(n + 60)}>Older…</button>}
     </div>
   );
 }
@@ -56,7 +60,7 @@ function Settings() {
         <div class="label" style={{ marginBottom: '6px' }}>How a month works</div>
         <Primer />
       </div>
-      <button class="btn block" onClick={() => openSheet({ k: 'intro' })}>Replay the morning briefing</button>
+      <button type="button" class="btn block" onClick={() => openSheet({ k: 'intro' })}>Replay the morning briefing</button>
       <div class="card stack">
         <div class="label">Export save</div>
         <Btn cls="block" onClick={async () => {
@@ -64,7 +68,7 @@ function Settings() {
         }}>Generate export text</Btn>
         {exp && (
           <>
-            <textarea readOnly value={exp} onFocus={(e) => e.currentTarget.select()} />
+            <textarea readOnly aria-label="Exported save text" value={exp} onFocus={(e) => e.currentTarget.select()} />
             <Btn cls="block" onClick={() => {
               const url = URL.createObjectURL(new Blob([exp], { type: 'text/plain' }));
               const a = document.createElement('a');
@@ -81,7 +85,7 @@ function Settings() {
       </div>
       <div class="card stack">
         <div class="label">Import save (replaces this game)</div>
-        <textarea value={imp} onInput={(e) => setImp(e.currentTarget.value)} placeholder="Paste exported text" />
+        <textarea aria-label="Save text to import" value={imp} onInput={(e) => setImp(e.currentTarget.value)} placeholder="Paste exported text" />
         {err && <div class="warnbox">{err}</div>}
         <ConfirmBtn label="Import" cls="block" onClick={async () => {
           try { startGame(await importSave(imp)); toast('Save imported.'); } catch (e) { setErr(errMsg(e)); }
@@ -92,7 +96,7 @@ function Settings() {
         <div class="hint">Retiring ends the game and shows the epilogue: the people whose lives you changed.</div>
         <ConfirmBtn label="Retire" cls="block warn" onClick={() => { run((st) => retire(st)); }} />
       </div>
-      <button class="btn block" onClick={() => setGame(null)}>Quit to title (progress is autosaved)</button>
+      <button type="button" class="btn block" onClick={() => setGame(null)}>Quit to title (progress is autosaved)</button>
       <div class="small faint">Seed {g.seed} · {monthLabel(g.month)}</div>
     </div>
   );

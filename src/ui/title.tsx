@@ -62,6 +62,7 @@ export function Title() {
           </p>
           {saved && (
             <button
+              type="button"
               class="btn primary block"
               onClick={() => {
                 const g = loadGame();
@@ -72,65 +73,68 @@ export function Title() {
               Continue
             </button>
           )}
-          <button class={`btn block ${saved ? '' : 'primary'}`} onClick={() => setView('new')}>New game</button>
-          <button class="btn block" onClick={() => setView('import')}>Import save</button>
+          <button type="button" class={`btn block ${saved ? '' : 'primary'}`} onClick={() => setView('new')}>New game</button>
+          <button type="button" class="btn block" onClick={() => setView('import')}>Import save</button>
           {saved && (
-            <button class="btn sm block" onClick={() => { clearSave(); setSaved(false); setView('main'); setErr('Saved game deleted.'); }}>
+            <button type="button" class="btn sm block" onClick={() => { clearSave(); setSaved(false); setView('main'); setErr('Saved game deleted.'); }}>
               Delete saved game
             </button>
           )}
-          {err && <div class="warnbox">{err}</div>}
+          {err && <div class="warnbox" role="alert">{err}</div>}
         </div>
       )}
 
       {view === 'new' && (
         <div class="stack">
           <div>
-            <div class="label">Company</div>
+            <label class="label" for="co-name">Company</label>
             <div class="row">
-              <input type="text" class="grow" value={company} onInput={(e) => setCompany(e.currentTarget.value)} />
-              <button class="btn" onClick={() => setCompany(suggest())} aria-label="Suggest a name">↻</button>
+              <input id="co-name" type="text" class="grow" value={company} onInput={(e) => setCompany(e.currentTarget.value)} />
+              <button type="button" class="btn" onClick={() => setCompany(suggest())} aria-label="Suggest a name">↻</button>
             </div>
           </div>
           <div class="grid2">
             <div>
-              <div class="label">First name</div>
-              <input type="text" value={first} placeholder="Alex" onInput={(e) => setFirst(e.currentTarget.value)} />
+              <label class="label" for="pl-first">First name</label>
+              <input id="pl-first" type="text" value={first} placeholder="Alex" onInput={(e) => setFirst(e.currentTarget.value)} />
             </div>
             <div>
-              <div class="label">Last name</div>
-              <input type="text" value={last} placeholder="Morrow" onInput={(e) => setLast(e.currentTarget.value)} />
+              <label class="label" for="pl-last">Last name</label>
+              <input id="pl-last" type="text" value={last} placeholder="Morrow" onInput={(e) => setLast(e.currentTarget.value)} />
             </div>
           </div>
           <div>
-            <div class="label">Pronouns</div>
-            <Seg value={pro} onChange={setPro} options={[['she', 'she/her'], ['he', 'he/him'], ['they', 'they/them']]} />
+            <div class="label" id="pl-pro">Pronouns</div>
+            <div role="group" aria-labelledby="pl-pro">
+              <Seg value={pro} onChange={setPro} options={[['she', 'she/her'], ['he', 'he/him'], ['they', 'they/them']]} />
+            </div>
           </div>
           <div>
-            <div class="label">Seed (optional)</div>
-            <input type="text" value={seed} placeholder="random" onInput={(e) => setSeed(e.currentTarget.value)} />
+            <label class="label" for="seed">Seed (optional)</label>
+            <input id="seed" type="text" value={seed} placeholder="random" onInput={(e) => setSeed(e.currentTarget.value)} />
           </div>
-          {err && <div class="warnbox">{err}</div>}
-          <button class="btn primary block" disabled={busy} onClick={start}>
+          {err && <div class="warnbox" role="alert">{err}</div>}
+          <button type="button" class="btn primary block" disabled={busy} onClick={start}>
             {busy ? 'Reviewing five years of company records…' : 'Take the chair'}
           </button>
-          <button class="btn block" disabled={busy} onClick={() => setView('main')}>Back</button>
+          <button type="button" class="btn block" disabled={busy} onClick={() => setView('main')}>Back</button>
         </div>
       )}
 
       {view === 'import' && (
         <div class="stack">
-          <div class="label">Paste exported save</div>
-          <textarea value={text} onInput={(e) => setText(e.currentTarget.value)} />
+          <label class="label" for="import-text">Paste exported save</label>
+          <textarea id="import-text" value={text} onInput={(e) => setText(e.currentTarget.value)} />
           <label class="btn block">
             Choose a saved file…
-            <input type="file" accept=".txt,.json,text/plain" style={{ display: 'none' }} onChange={async (e) => {
+            <input type="file" class="sr-only" accept=".txt,.json,text/plain" onChange={async (e) => {
               const f = e.currentTarget.files?.[0];
               if (f) setText(await f.text());
             }} />
           </label>
-          {err && <div class="warnbox">{err}</div>}
+          {err && <div class="warnbox" role="alert">{err}</div>}
           <button
+            type="button"
             class="btn primary block"
             onClick={async () => {
               try {
@@ -142,7 +146,7 @@ export function Title() {
           >
             Import
           </button>
-          <button class="btn block" onClick={() => { setView('main'); setErr(''); }}>Back</button>
+          <button type="button" class="btn block" onClick={() => { setView('main'); setErr(''); }}>Back</button>
         </div>
       )}
     </div>

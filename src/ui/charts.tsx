@@ -26,6 +26,11 @@ export function Chart({ title, values, format, color = 'var(--cyan)', bars, thre
   const y = (v: number) => PAD + (1 - (v - min) / (max - min)) * (H - PAD * 2);
   const x = (i: number) => (values.length <= 1 ? W / 2 : PAD + (i / (values.length - 1)) * (W - PAD * 2));
   const delta = values.length > 1 ? values[values.length - 1] - values[values.length - 2] : 0;
+  const up = delta >= 0;
+  const summary = cur === null ? title : [
+    `${title}: now ${format(cur)}${values.length > 1 ? `, ${up ? 'up' : 'down'} ${format(Math.abs(delta))} on last month` : ''}`,
+    `low ${format(Math.min(...values))}, high ${format(Math.max(...values))} over ${values.length} ${values.length === 1 ? 'month' : 'months'}`,
+  ].join('; ') + (threshold !== undefined ? `. Dashed line at ${format(threshold)}` : '');
 
   return (
     <div class="card chart">
@@ -34,8 +39,8 @@ export function Chart({ title, values, format, color = 'var(--cyan)', bars, thre
         <span class="mono" style={{ color }}>
           {cur === null ? '—' : format(cur)}
           {values.length > 1 && (
-            <span class={delta >= 0 ? 'green' : 'red'} style={{ fontSize: '11px', marginLeft: '6px' }}>
-              {delta >= 0 ? '▲' : '▼'} {format(Math.abs(delta))}
+            <span class={up ? 'green' : 'red'} style={{ fontSize: '11px', marginLeft: '6px' }}>
+              <span aria-hidden="true">{up ? '▲' : '▼'}</span> <span class="sr-only">{up ? 'up' : 'down'} </span>{format(Math.abs(delta))}
             </span>
           )}
         </span>
@@ -43,7 +48,7 @@ export function Chart({ title, values, format, color = 'var(--cyan)', bars, thre
       {values.length === 0 ? (
         <div class="hint" style={{ padding: '20px 0' }}>No data yet. End a month to start the record.</div>
       ) : (
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={summary}>
           <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} stroke="var(--rule)" />
           {bars && <line x1={PAD} x2={W - PAD} y1={y(0)} y2={y(0)} stroke="var(--faint)" stroke-width="1" />}
           {threshold !== undefined && (
@@ -67,7 +72,7 @@ export function Chart({ title, values, format, color = 'var(--cyan)', bars, thre
         </svg>
       )}
       {values.length > 0 && (
-        <div class="row small faint mono" style={{ justifyContent: 'space-between' }}>
+        <div class="row small faint mono" aria-hidden="true" style={{ justifyContent: 'space-between' }}>
           <span>low {format(Math.min(...values))}</span>
           <span>{values.length} mo</span>
           <span>high {format(Math.max(...values))}</span>

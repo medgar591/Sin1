@@ -39,13 +39,13 @@ export function UnitPicker({ g, onPick, exclude, filter }: { g: GameState; onPic
   const rows = flatUnits(g, exclude).filter(({ id }) => (!filter || filter(id)) && (!q || g.units[id].name.toLowerCase().includes(q.toLowerCase())));
   return (
     <div>
-      <input type="search" placeholder="Filter units…" value={q} onInput={(e) => setQ(e.currentTarget.value)} style={{ marginBottom: '8px' }} />
+      <input type="search" aria-label="Filter units" placeholder="Filter units…" value={q} onInput={(e) => setQ(e.currentTarget.value)} style={{ marginBottom: '8px' }} />
       <div class="list" style={{ maxHeight: '40dvh', overflowY: 'auto' }}>
         {rows.map(({ id, depth }) => {
           const u = g.units[id];
           const lead = u.leadId ? g.people[u.leadId] : null;
           return (
-            <button key={id} class="item" onClick={() => onPick(id)} style={{ paddingLeft: q ? 12 : 12 + depth * 12 }}>
+            <button type="button" key={id} class="item" onClick={() => onPick(id)} style={{ paddingLeft: q ? 12 : 12 + depth * 12 }}>
               <Portrait id={u.leadId} size={28} />
               <div class="grow">
                 <div class="t">{u.kind === 'executive' ? 'CEO office' : u.name}</div>
@@ -67,11 +67,11 @@ export function PersonPicker({ g, onPick }: { g: GameState; onPick: (id: PersonI
     .slice(0, 25);
   return (
     <div>
-      <input type="search" placeholder="Search by name (2+ letters)…" value={q} onInput={(e) => setQ(e.currentTarget.value)} style={{ marginBottom: '8px' }} />
+      <input type="search" aria-label="Search people by name" placeholder="Search by name (2+ letters)…" value={q} onInput={(e) => setQ(e.currentTarget.value)} style={{ marginBottom: '8px' }} />
       {rows.length > 0 && (
         <div class="list" style={{ maxHeight: '36dvh', overflowY: 'auto' }}>
           {rows.map((p) => (
-            <button key={p.id} class="item" onClick={() => onPick(p.id)}>
+            <button type="button" key={p.id} class="item" onClick={() => onPick(p.id)}>
               <Portrait id={p.id} size={32} />
               <div class="grow"><div class="t">{fullName(p)}</div><div class="s">{p.title}</div></div>
             </button>

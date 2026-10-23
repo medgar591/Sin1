@@ -17,7 +17,10 @@ function Card({ e, kind }: { e: EpilogueEntry; kind: 'help' | 'harm' }) {
         {e.events.map((ev, i) => (
           <div key={i} class={ev.impact > 0 ? 'pos' : ev.impact < 0 ? 'neg' : ''}>
             <div class="small mono dim">{monthLabel(ev.month)}</div>
-            <div class="small">{ev.text}</div>
+            <div class="small">
+              {ev.impact !== 0 && <span class="sr-only">{ev.impact > 0 ? 'Good for them: ' : 'Bad for them: '}</span>}
+              {ev.text}
+            </div>
           </div>
         ))}
       </div>
@@ -31,6 +34,7 @@ export function GameOver() {
   const { data, err } = useMemo(() => {
     try { return { data: buildEpilogue(g), err: '' }; } catch (e) { return { data: null, err: e instanceof Error ? e.message : String(e) }; }
   }, []);
+  const toTitle = () => { clearSave(); setGame(null); };
   return (
     <div class="center over">
       <div class="label">{go.reason === 'ousted' ? 'Removed by the board' : 'Retired'} · {monthLabel(go.month)}</div>
@@ -38,6 +42,7 @@ export function GameOver() {
       <div class="label">Score</div>
       <div class="score">{Math.round(go.score).toLocaleString()}</div>
       <p class="dim">{go.summary}</p>
+      <button type="button" class="btn primary block" style={{ marginTop: '12px' }} onClick={toTitle}>Return to title</button>
 
       <h2 style={{ marginTop: '36px' }}>Lives you changed</h2>
       <p class="story dim">They were never headcount. Each of these people had a job, a boss, and a life that moved because of something you decided.</p>
@@ -52,7 +57,7 @@ export function GameOver() {
           {data.harmed.map((e) => <Card key={e.personId} e={e} kind="harm" />)}
         </>
       )}
-      <button class="btn primary block" style={{ marginTop: '24px' }} onClick={() => { clearSave(); setGame(null); }}>Return to title</button>
+      <button type="button" class="btn primary block" style={{ marginTop: '24px' }} onClick={toTitle}>Return to title</button>
     </div>
   );
 }

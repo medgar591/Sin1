@@ -12,16 +12,19 @@ import { PlayersView } from './players';
 import { ALLOWED_PARENTS, UnitPicker, subtreeIds } from './pickers';
 import { closeSheet, game, openPerson, openUnit, run, setOrgMode, setOrgUnit, showUnit, S, type OrgMode } from './store';
 
+/** The words behind the coloured edge on rows and nodes (0 fine, 1 amber, 2 red). */
+const HEALTH = ['', 'struggling', 'in trouble'] as const;
+
 function PersonRow({ p }: { p: Person }) {
   const g = game();
   const f = personFlag(g, p);
   return (
-    <button class="item" onClick={() => openPerson(p.id)}>
+    <button type="button" class="item" onClick={() => openPerson(p.id)}>
       <span class={`mark m${f}`} />
       <Portrait id={p.id} size={32} />
       <div class="grow">
         <div class="t">{fullName(p)}</div>
-        <div class="s">{p.title}</div>
+        <div class="s">{p.title}{HEALTH[f] && <> · {HEALTH[f]}</>}</div>
       </div>
       <div style={{ width: '56px' }}>
         <div class="small mono dim" style={{ textAlign: 'right' }}>{Math.round(p.performance)}</div>
@@ -37,12 +40,12 @@ function UnitRow({ u }: { u: OrgUnit }) {
   const lead = u.leadId ? g.people[u.leadId] : null;
   const hc = peopleUnder(g, u.id).filter((id) => g.people[id] && isActive(g.people[id])).length;
   return (
-    <button class="item" onClick={() => setOrgUnit(u.id)}>
+    <button type="button" class="item" onClick={() => setOrgUnit(u.id)}>
       <span class={`mark m${f}`} />
       <Portrait id={u.leadId} size={32} />
       <div class="grow">
         <div class="t">{u.name}</div>
-        <div class="s">{KIND_LABEL[u.kind]} · {lead ? fullName(lead) : <span class="red">vacant</span>} · {hc} ppl</div>
+        <div class="s">{KIND_LABEL[u.kind]} · {lead ? fullName(lead) : <span class="red">vacant</span>} · {hc} ppl{HEALTH[f] && <> · {HEALTH[f]}</>}</div>
       </div>
       <div style={{ width: '64px' }}>
         <div class="row small mono"><span class="dim grow">out</span>{Math.round(u.output)}</div>
@@ -71,7 +74,7 @@ function UnitsView() {
         {crumbs.map((c, i) => (
           <span key={c.id}>
             {i > 0 && <span class="sep"> › </span>}
-            <button onClick={() => setOrgUnit(c.id)}>{c.kind === 'executive' ? 'CEO' : c.name}</button>
+            <button type="button" onClick={() => setOrgUnit(c.id)}>{c.kind === 'executive' ? 'CEO' : c.name}</button>
           </span>
         ))}
       </div>
@@ -81,7 +84,7 @@ function UnitsView() {
             <h3>{u.kind === 'executive' ? 'CEO office' : u.name}</h3>
             <div class="small dim">{KIND_LABEL[u.kind]} · {hc} people · budget {formatZuzu(u.budget)}/mo</div>
           </div>
-          <button class="btn sm" onClick={() => openUnit(id)}>Actions</button>
+          <button type="button" class="btn sm" onClick={() => openUnit(id)}>Actions</button>
         </div>
         <div class="grid2" style={{ marginTop: '8px' }}>
           <div><div class="row small"><span class="dim grow">Output</span><span class="mono">{Math.round(u.output)}</span></div><Bar value={u.output} max={150} cls={levelClass(u.output, 75, 50)} /></div>
@@ -95,7 +98,7 @@ function UnitsView() {
         </details>
         <div class="small" style={{ marginTop: '8px' }}>
           {intel ? <span class="green">Intel current: investigated {g.month - (unitAncestry(g, id).map((x) => x.investigatedMonth).filter((m): m is number => m !== null).sort((a, b) => b - a)[0] ?? g.month)} mo ago</span>
-            : <span class="dim">Internal dynamics unknown: <a class="link" onClick={() => openUnit(id)}>investigate</a></span>}
+            : <span class="dim">Internal dynamics unknown: <button type="button" class="link" onClick={() => openUnit(id)}>investigate</button></span>}
         </div>
       </div>
 
@@ -112,7 +115,7 @@ function UnitsView() {
         <>
           <h2>Members <span class="mono">{members.length}</span></h2>
           <div class="list">{shown.map((p) => <PersonRow key={p.id} p={p} />)}</div>
-          {members.length > shown.length && <button class="btn block" style={{ marginTop: '8px' }} onClick={() => setAll(true)}>Show all {members.length}</button>}
+          {members.length > shown.length && <button type="button" class="btn block" style={{ marginTop: '8px' }} onClick={() => setAll(true)}>Show all {members.length}</button>}
         </>
       )}
       {u.childIds.length === 0 && members.length === 0 && <div class="hint">Nobody here besides the lead.</div>}
@@ -137,13 +140,13 @@ function StaffNode({ id }: { id: string }) {
   return (
     <li class="cli slim">
       <div class="cn slim f0">
-        <button class="cn-face" onClick={() => openPerson(id)} aria-label={fullName(p)}>
+        <button type="button" class="cn-face" onClick={() => openPerson(id)} aria-hidden="true" tabIndex={-1}>
           <Portrait id={id} size={32} dot={stanceColor(op)} />
         </button>
-        <div class="cn-body" onClick={() => openPerson(id)}>
-          <div class="t">{fullName(p)}</div>
-          <div class="s">{p.title} · your office</div>
-        </div>
+        <button type="button" class="cn-body" onClick={() => openPerson(id)}>
+          <span class="t">{fullName(p)}</span>
+          <span class="s">{p.title} · {stanceWord(op).toLowerCase()} · your office</span>
+        </button>
       </div>
     </li>
   );
@@ -162,29 +165,34 @@ function UnitNode({ u, rerender }: { u: OrgUnit; rerender: () => void }) {
   const direct = !!lead && !root && bossOf(g, lead.id) === me;
   const op = direct ? g.relations[lead!.id]?.[me]?.opinion ?? 0 : 0;
   const flag = unitFlag(g, u);
+  const title = root ? g.company.name : u.name;
+  const health = flag === 1 ? 'struggling' : flag === 2 && lead ? 'in trouble' : '';
   const toggle = () => {
-    if (!foldable) return showUnit(u.id);
     chartToggle.set(u.id, !open);
     rerender();
   };
+  // Tapping the body is a pointer shortcut; the chevron and › buttons are the accessible controls.
+  const tapBody = () => (foldable ? toggle() : showUnit(u.id));
   return (
     <li class="cli">
       <div class={`cn f${flag}`}>
-        <button class="cn-face" onClick={() => (lead ? openPerson(lead.id) : showUnit(u.id))} aria-label={lead ? fullName(lead) : 'Vacant seat'}>
+        <button type="button" class="cn-face" onClick={() => (lead ? openPerson(lead.id) : showUnit(u.id))} aria-hidden="true" tabIndex={-1}>
           <Portrait id={lead?.id} size={32} dot={direct ? stanceColor(op) : undefined} />
         </button>
-        <div class="cn-body" onClick={toggle}>
-          <div class="t">{root ? g.company.name : u.name}</div>
+        <div class="cn-body tap" onClick={tapBody}>
+          <div class="t">{title}</div>
           <div class="s">
             {lead ? (
-              <a class="cn-lead" onClick={(e) => { e.stopPropagation(); openPerson(lead.id); }}>{root ? `${fullName(lead)} (you)` : fullName(lead)}</a>
+              <button type="button" class="cn-lead" onClick={(e) => { e.stopPropagation(); openPerson(lead.id); }}>{root ? `${fullName(lead)} (you)` : fullName(lead)}</button>
             ) : <span class="red">Vacant</span>}
             {direct && <span style={{ color: stanceColor(op) }}> · {stanceWord(op).toLowerCase()}</span>}
           </div>
-          <div class="s2">{root ? 'CEO' : KIND_LABEL[u.kind]} · {hc} {kids.length || root ? 'people' : 'staff'}</div>
+          <div class="s2">{root ? 'CEO' : KIND_LABEL[u.kind]} · {hc} {kids.length || root ? 'people' : 'staff'}{health && <> · {health}</>}</div>
         </div>
-        {foldable && <span class="cn-chev" onClick={toggle}>{open ? '▾' : '▸'}</span>}
-        <button class="cn-go" onClick={() => showUnit(u.id)} aria-label={`Open ${u.name} in Units`}>›</button>
+        {foldable && (
+          <button type="button" class="cn-chev" aria-expanded={open} aria-label={`Fold or unfold ${title}`} onClick={toggle}>{open ? '▾' : '▸'}</button>
+        )}
+        <button type="button" class="cn-go" onClick={() => showUnit(u.id)} aria-label={`Open ${title} in Units`}>›</button>
       </div>
       {foldable && open && (
         <ul>
@@ -205,9 +213,9 @@ function OrgChart() {
   return (
     <div>
       <div class="chartkey">
-        Officers report to you.{ops && <> Divisions report to the COO{coo ? <> (<a class="link" onClick={() => openPerson(coo.id)}>{fullName(coo)}</a>)</> : ''}.</>}
+        Officers report to you.{ops && <> Divisions report to the COO{coo ? <> (<button type="button" class="link" onClick={() => openPerson(coo.id)}>{fullName(coo)}</button>)</> : ''}.</>}
       </div>
-      <div class="hint" style={{ marginBottom: '8px' }}>Dot on a face: how they see you. Coloured edge: unit health. Tap a row to fold it; › opens the unit.</div>
+      <div class="hint" style={{ marginBottom: '8px' }}>Dot on a face: how they see you, also written under their name. Amber edge: struggling. Red edge: in trouble or vacant. Tap a row or ▸ to fold it; › opens the unit.</div>
       <ul class="ctree top"><UnitNode u={g.units[g.rootUnitId]} rerender={rerender} /></ul>
     </div>
   );
@@ -259,12 +267,12 @@ export function UnitSheet({ id }: { id: string }) {
       <div class="small dim">{KIND_LABEL[u.kind]} · budget {formatZuzu(u.budget)}/mo · output {Math.round(u.output)} · morale {Math.round(u.morale)}</div>
       <div class="stack" style={{ marginTop: '10px' }}>
         <div class="grid2">
-          <button class="btn" onClick={() => tog('budget')}>Budget</button>
-          <button class="btn" onClick={() => tog('hire')}>Hire</button>
-          {movable && <button class="btn" onClick={() => tog('move')}>Move unit</button>}
-          {mergeable && <button class="btn" onClick={() => tog('merge')}>Merge into…</button>}
-          {kinds.length > 0 && <button class="btn" onClick={() => tog('create')}>New sub-unit</button>}
-          {mergeable && <button class="btn danger" onClick={() => tog('dissolve')}>Dissolve</button>}
+          <button type="button" class="btn" onClick={() => tog('budget')}>Budget</button>
+          <button type="button" class="btn" onClick={() => tog('hire')}>Hire</button>
+          {movable && <button type="button" class="btn" onClick={() => tog('move')}>Move unit</button>}
+          {mergeable && <button type="button" class="btn" onClick={() => tog('merge')}>Merge into…</button>}
+          {kinds.length > 0 && <button type="button" class="btn" onClick={() => tog('create')}>New sub-unit</button>}
+          {mergeable && <button type="button" class="btn danger" onClick={() => tog('dissolve')}>Dissolve</button>}
         </div>
         <Btn cls="block" cost={ATTENTION_COST.investigateUnit} onClick={() => run((s) => investigateUnit(s, id))}>Investigate unit (Security)</Btn>
 
@@ -307,11 +315,11 @@ export function UnitSheet({ id }: { id: string }) {
           <div class="card stack">
             {kinds.length > 1 && <Seg value={kind as string} onChange={(v) => setNewKind(v as UnitKind)} options={kinds} />}
             {kind === 'function' && (
-              <select value={fnSel} onChange={(e) => setFk(e.currentTarget.value as FunctionKind)}>
+              <select aria-label="Function" value={fnSel} onChange={(e) => setFk(e.currentTarget.value as FunctionKind)}>
                 {freeFns.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
             )}
-            <input type="text" placeholder="Unit name" value={name} onInput={(e) => setName(e.currentTarget.value)} />
+            <input type="text" aria-label="Unit name" placeholder="Unit name" value={name} onInput={(e) => setName(e.currentTarget.value)} />
             <Btn cls="primary block" cost={ATTENTION_COST.restructure} disabled={!name.trim()} onClick={() =>
               run((s) => createUnit(s, id, kind as Exclude<UnitKind, 'executive' | 'function'> | 'function', name.trim(), kind === 'function' ? fnSel : undefined))}>
               Create
