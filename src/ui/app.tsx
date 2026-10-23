@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { useEffect } from 'preact/hooks';
 import type { GameState } from '../sim/types';
 import { advanceMonth } from '../sim/turn';
 import { formatZuzu, monthLabel } from '../sim/org';
@@ -87,17 +88,30 @@ const ICON: Record<Tab, JSX.Element> = {
   more: <path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3.5" stroke-linecap="round" />,
 };
 const TABS: [Tab, string][] = [['dash', 'Dash'], ['org', 'Org'], ['inbox', 'Inbox'], ['board', 'Board'], ['more', 'More']];
+/** Page headings, read by screen readers (the tab labels are short). */
+const TAB_NAME: Record<Tab, string> = { dash: 'Dashboard', org: 'Organisation', inbox: 'Inbox', board: 'Board', more: 'More' };
 
 function TabBar() {
   const g = S.game!;
   const unresolved = pendingInbox(g).length;
+  useEffect(() => {
+    document.title = `${TAB_NAME[S.tab]} · Sin1`;
+    return () => {
+      document.title = 'Sin1';
+    };
+  }, [S.tab]);
   return (
-    <nav class="tabbar">
+    <nav class="tabbar" aria-label="Main">
       {TABS.map(([t, l]) => (
-        <button key={t} class={`tab ${S.tab === t ? 'on' : ''}`} onClick={() => setTab(t)}>
-          <svg viewBox="0 0 24 24">{ICON[t]}</svg>
+        <button type="button" key={t} class={`tab ${S.tab === t ? 'on' : ''}`} aria-current={S.tab === t ? 'page' : undefined} onClick={() => setTab(t)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">{ICON[t]}</svg>
           {l}
-          {t === 'inbox' && unresolved > 0 && <span class="badge">{unresolved}</span>}
+          {t === 'inbox' && unresolved > 0 && (
+            <>
+              <span class="badge" aria-hidden="true">{unresolved}</span>
+              <span class="sr-only">, {unresolved} waiting</span>
+            </>
+          )}
         </button>
       ))}
     </nav>
@@ -159,8 +173,16 @@ function renderSheet(s: SheetT, i: number) {
 
 function ToastView() {
   const t = useToast();
-  if (!t) return null;
-  return <div key={t.id} role="status" class={`toast ${t.kind === 'bad' ? 'bad' : ''} ${S.sheets.length ? 'top' : ''}`}>{t.text}</div>;
+  return (
+    <>
+      <div class="sr-only" role="status" aria-live="polite">{t?.text}</div>
+      {t && (
+        <div key={t.id} class={`toast ${t.kind === 'bad' ? 'bad' : ''} ${S.sheets.length ? 'top' : ''}`} aria-hidden="true">
+          {t.text}
+        </div>
+      )}
+    </>
+  );
 }
 
 export function App() {
@@ -171,6 +193,7 @@ export function App() {
     <>
       <TopBar />
       <div class="main">
+        <h1 class="sr-only">{TAB_NAME[S.tab]}</h1>
         {S.tab === 'dash' && <Dashboard />}
         {S.tab === 'org' && <OrgView />}
         {S.tab === 'inbox' && <Inbox />}

@@ -1,5 +1,5 @@
 import type { ComponentChildren, JSX } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import type { GameState, OrgUnit, Person, PersonId, Trait, UnitId, UnitKind } from '../sim/types';
 import { fullName, hasAttention, unit as getUnit, unitAncestry } from '../sim/org';
 import { closeSheet, openPerson, S } from './store';
@@ -47,9 +47,9 @@ export function DivBar({ value }: { value: number }) {
 
 export function Pips({ n, of }: { n: number; of: number }) {
   return (
-    <span class="pips" aria-label={`${n} of ${of} attention`}>
+    <span class="pips" role="img" aria-label={`${n} of ${of} attention`}>
       {Array.from({ length: of }, (_, i) => (
-        <span key={i} class={`pip ${i < n ? 'on' : ''}`} />
+        <span key={i} class={`pip ${i < n ? 'on' : ''}`} aria-hidden="true" />
       ))}
     </span>
   );
@@ -68,9 +68,11 @@ interface BtnProps {
 export function Btn({ children, onClick, cost = 0, cls = '', disabled, title }: BtnProps) {
   const short = cost > (S.game?.player.attentionLeft ?? 0);
   return (
-    <button class={`btn ${cls}`} disabled={disabled || short} onClick={onClick} title={short ? 'Not enough attention' : title}>
+    <button type="button" class={`btn ${cls}`} disabled={disabled || short} onClick={onClick} title={short ? 'Not enough attention' : title}>
       {children}
-      {cost > 0 && <span class="cost">{'●'.repeat(cost)}</span>}
+      {cost > 0 && <span class="cost" aria-hidden="true">{'●'.repeat(cost)}</span>}
+      {cost > 0 && <span class="sr-only">, costs {cost} attention</span>}
+      {short && <span class="sr-only">, not enough attention</span>}
     </button>
   );
 }
@@ -101,7 +103,7 @@ export function Seg<T extends string>({ value, options, onChange }: { value: T; 
   return (
     <div class="seg">
       {options.map(([v, l]) => (
-        <button key={v} class={v === value ? 'on' : ''} onClick={() => onChange(v)}>
+        <button type="button" key={v} class={v === value ? 'on' : ''} aria-pressed={v === value} onClick={() => onChange(v)}>
           {l}
         </button>
       ))}
@@ -117,6 +119,7 @@ export function Stepper({
   max = Infinity,
   format = (n: number) => String(n),
   small,
+  label,
 }: {
   value: number;
   onChange: (v: number) => void;
@@ -125,23 +128,54 @@ export function Stepper({
   max?: number;
   format?: (n: number) => string;
   small?: boolean;
+  /** What the value is, for screen readers: "Decrease <label>". */
+  label?: string;
 }) {
   return (
     <div class={`stepper ${small ? 'sm' : ''}`}>
-      <button aria-label="less" onClick={() => onChange(clampN(value - step, min, max))}>−</button>
-      <div class="v">{format(value)}</div>
-      <button aria-label="more" onClick={() => onChange(clampN(value + step, min, max))}>+</button>
+      <button type="button" aria-label={label ? `Decrease ${label}` : 'Decrease'} onClick={() => onChange(clampN(value - step, min, max))}>−</button>
+      <div class="v" aria-live="polite">{format(value)}</div>
+      <button type="button" aria-label={label ? `Increase ${label}` : 'Increase'} onClick={() => onChange(clampN(value + step, min, max))}>+</button>
     </div>
   );
 }
 
+/** Moves inert onto the page behind open sheets: the page, and every sheet except the top one. */
+function syncPageInert(): void {
+  const scrims = document.querySelectorAll('.scrim');
+  const open = scrims.length > 0;
+  document.querySelectorAll('.topbar, .main, .tabbar').forEach((el) => (open ? el.setAttribute('inert', '') : el.removeAttribute('inert')));
+  scrims.forEach((el, i) => (i < scrims.length - 1 ? el.setAttribute('inert', '') : el.removeAttribute('inert')));
+}
+
+if (typeof document !== 'undefined') {
+  // Escape closes the top sheet.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && S.sheets.length > 0) closeSheet();
+  });
+}
+
 export function Sheet({ title, children }: { title: ComponentChildren; children: ComponentChildren }) {
+  const titleId = useId();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const was = document.activeElement;
+    closeRef.current?.focus();
+    syncPageInert();
+    return () => {
+      // Deferred: the sheet's DOM is still there now, and the next sheet down must be live before focus goes back to it.
+      setTimeout(() => {
+        syncPageInert();
+        if (was instanceof HTMLElement && was.isConnected && !was.closest('[inert]')) was.focus();
+      }, 0);
+    };
+  }, []);
   return (
     <div class="scrim" onClick={(e) => e.target === e.currentTarget && closeSheet()}>
-      <div class="sheet" role="dialog">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div class="hd">
-          <h3 class="grow">{title}</h3>
-          <button class="btn sm" onClick={closeSheet}>Close</button>
+          <h2 class="grow" id={titleId}>{title}</h2>
+          <button type="button" class="btn sm" ref={closeRef} onClick={closeSheet}>Close</button>
         </div>
         {children}
       </div>
@@ -153,10 +187,10 @@ export function PersonChip({ id }: { id: PersonId }) {
   const p = S.game?.people[id];
   if (!p) return null;
   return (
-    <span class="chip" onClick={() => openPerson(id)}>
+    <button type="button" class="chip" onClick={() => openPerson(id)}>
       <Portrait id={id} size={20} />
       <span class="nm">{fullName(p)}</span>
-    </span>
+    </button>
   );
 }
 
@@ -164,9 +198,9 @@ export function PersonLink({ id }: { id: PersonId }) {
   const p = S.game?.people[id];
   if (!p) return <span class="dim">—</span>;
   return (
-    <a class="link" onClick={() => openPerson(id)}>
+    <button type="button" class="link" onClick={() => openPerson(id)}>
       {fullName(p)}
-    </a>
+    </button>
   );
 }
 

@@ -548,12 +548,14 @@ interface PortraitProps {
   onClick?: () => void;
 }
 
+/** A portrait; with onClick it is a button named after the person. */
 export function Portrait({ id, size = 40, ring, dot, onClick }: PortraitProps) {
   const p = id ? S.game?.people[id] : undefined;
   const style = { width: `${size}px`, height: `${size}px`, ...(ring ? { '--ring': ring } : {}) } as JSX.CSSProperties;
   const gone = !!p && p.status !== 'active';
-  return (
-    <span class={`pw ${onClick ? 'tap' : ''}`} style={style} onClick={onClick} title={p ? fullName(p) : 'Vacant'}>
+  const name = p ? fullName(p) : 'Vacant';
+  const inner = (
+    <>
       {p ? (
         <span class={`pt ${gone ? 'gone' : ''}`}>
           <FaceSvg p={p} />
@@ -562,20 +564,36 @@ export function Portrait({ id, size = 40, ring, dot, onClick }: PortraitProps) {
         <span class="pt vacant" />
       )}
       {dot && p && <i class="pdot" style={{ background: dot, width: `${Math.max(7, size * 0.26)}px`, height: `${Math.max(7, size * 0.26)}px` }} />}
+    </>
+  );
+  return onClick ? (
+    <button type="button" class="pw tap" style={style} onClick={onClick} title={name} aria-label={name}>
+      {inner}
+    </button>
+  ) : (
+    <span class="pw" style={style} title={name}>
+      {inner}
     </span>
   );
 }
 
-/** Portrait with name and title beside it. */
+/** Portrait with name and title beside it. With onClick the whole row is a button. */
 export function PersonBadge({ id, size = 36, sub, onClick }: { id: PersonId | null | undefined; size?: number; sub?: string; onClick?: () => void }) {
   const p = id ? S.game?.people[id] : undefined;
-  return (
-    <span class={`pbadge ${onClick ? 'tap' : ''}`} onClick={onClick}>
+  const body = (
+    <>
       <Portrait id={id} size={size} />
       <span class="grow">
         <span class="t">{p ? fullName(p) : 'Vacant'}</span>
         <span class="s">{sub ?? p?.title ?? ''}</span>
       </span>
-    </span>
+    </>
+  );
+  return onClick ? (
+    <button type="button" class="pbadge tap" onClick={onClick}>
+      {body}
+    </button>
+  ) : (
+    <span class="pbadge">{body}</span>
   );
 }
