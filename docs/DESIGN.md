@@ -163,6 +163,32 @@ The player should always know what they are trying to do this month.
   judged at the next meeting; a met ask warms that director and the board,
   a missed one cools them. Asks often conflict, so the player picks whom
   to please.
+- **First steps.** A new game opens with a short checklist (announce
+  guidance, split the bonus pool, meet an officer, end the month) above
+  the agenda, and the briefing starts with three lines "in short". The
+  agenda suggests whom to meet when nothing is urgent.
+- **Guidance is a choice with stakes.** Presets (Safe, the board's bar,
+  Stretch) and a live note on what a beat would earn: guidance well below
+  the board's bar earns little credit, full credit starts just above it.
+
+## Feedback
+
+Every decision should show its consequence.
+
+- **Month in review.** Ending a month lands on the dashboard with what the
+  month did: profit against the month before, cash, share price and
+  confidence before and after, where the quarter stands, what happened
+  while you weren't looking, and what is waiting.
+- **Quarter report card.** A board meeting opens with profit against
+  guidance and the board's bar, why the price and confidence moved, and
+  how close any vote against you came, before the meeting itself.
+- **Face to face shows the numbers.** A meeting or lobbying scene says how
+  the speaker's opinion of you and loyalty moved.
+- **No nagging.** End month asks first only when something is left that
+  the month's end would settle for you, and says what will happen.
+- **Triage.** The inbox puts what expires and what matters first, folds
+  feuds between staff who lead nothing into one decision, and says what
+  happens if you don't decide.
 
 ## Face to face
 
@@ -244,6 +270,18 @@ terminal look.
   history with you.
 - **Board:** directors, their agendas and the vote count.
 - **Inbox:** this month's requests and events.
+
+### Accessibility
+
+- Everything is reachable and operable by keyboard; sheets are modal
+  dialogs that trap focus, close on Escape and return focus.
+- Screen readers get names for every control, the attention and cost
+  dots as words, chart summaries, and a live region for messages.
+- Colour never carries meaning alone: stance, health, urgency and
+  outcomes are also written out.
+- Text meets 4.5:1 contrast, nothing is smaller than 11px, touch targets
+  are 44px where possible, layouts reflow at 320px and large text, and
+  motion respects reduced-motion settings.
 
 ## Technology
 
