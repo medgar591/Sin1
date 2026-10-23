@@ -12,6 +12,7 @@ vi.mock('./generate', async () => {
 });
 
 import * as A from './actions';
+import { checkPromises } from './promises';
 import { buildEpilogue, computeScore, endGame } from './epilogue';
 import { chainOfCommand, setTag } from './org';
 
@@ -272,7 +273,7 @@ describe('meetings and promises', () => {
     const { state, workers } = smallCompany();
     const w = workers[0];
     state.player.attentionLeft = 99;
-    state.cliques.c1 = { id: 'c1', name: 'The Circle', leaderId: w.id, memberIds: [w.id], agenda: 'x', known: false };
+    state.cliques.c1 = { id: 'c1', name: 'The Circle', leaderId: w.id, memberIds: [w.id], agenda: 'x', known: false, momentum: 0 };
     w.cliqueId = 'c1';
     w.secrets = [{ id: 's', kind: 'affair', description: 'an affair', severity: 1, revealed: false, involvedIds: [] }];
     w.skills.guile = 0;
@@ -286,7 +287,7 @@ describe('meetings and promises', () => {
     expect(A.meet(state, w.id, 'promise', { kind: 'promotion', detail: 'a team of your own', months: 3 }).ok).toBe(true);
     expect(w.loyalty).toBeGreaterThanOrEqual(58);
     A.promote(state, w.id, team.id);
-    A.checkPromises(state);
+    checkPromises(state);
     expect(state.promises[0].state).toBe('kept');
     expect(w.history.some((e) => e.kind === 'promiseKept')).toBe(true);
   });
@@ -295,10 +296,10 @@ describe('meetings and promises', () => {
     const w = workers[0];
     A.meet(state, w.id, 'promise', { kind: 'raise', detail: 'a raise', months: 2 });
     A.setSalary(state, w.id, w.salary * 1.05);
-    A.checkPromises(state);
+    checkPromises(state);
     expect(state.promises[0].state).toBe('open');
     A.setSalary(state, w.id, 60_000 * 1.12);
-    A.checkPromises(state);
+    checkPromises(state);
     expect(state.promises[0].state).toBe('kept');
   });
   it('promise broken path hits friends too', () => {
@@ -309,7 +310,7 @@ describe('meetings and promises', () => {
     state.month = 5;
     const loyalty = w.loyalty;
     const fop = state.relations[friend.id]?.[ceo.id]?.opinion ?? 0;
-    A.checkPromises(state);
+    checkPromises(state);
     expect(state.promises[0].state).toBe('broken');
     expect(w.loyalty).toBeLessThan(loyalty - 15);
     expect(state.relations[friend.id][ceo.id].opinion).toBeLessThan(fop);
@@ -319,10 +320,10 @@ describe('meetings and promises', () => {
     const { state, workers } = smallCompany();
     A.meet(state, workers[0].id, 'promise', { kind: 'protection', detail: 'your job is safe', months: 2 });
     state.month = 1;
-    A.checkPromises(state);
+    checkPromises(state);
     expect(state.promises[0].state).toBe('open');
     state.month = 2;
-    A.checkPromises(state);
+    checkPromises(state);
     expect(state.promises[0].state).toBe('kept');
   });
 });
@@ -350,7 +351,7 @@ describe('investigation', () => {
     expect(w.secrets[0].revealed).toBe(true);
     expect(w.investigatedMonth).toBe(0);
     const w2 = workers[1];
-    state.cliques.c = { id: 'c', name: 'C', leaderId: w2.id, memberIds: [w2.id], agenda: '', known: false };
+    state.cliques.c = { id: 'c', name: 'C', leaderId: w2.id, memberIds: [w2.id], agenda: '', known: false, momentum: 0 };
     w2.cliqueId = 'c';
     setTag(state, workers[0].id, w2.id, 'rival');
     const r = A.investigateUnit(state, team.id);

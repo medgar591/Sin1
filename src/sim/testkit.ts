@@ -35,6 +35,11 @@ export function emptyState(seed = 1): GameState {
     fixerJobs: [],
     boardMeetings: [],
     gameOver: null,
+    unitChurn: {},
+    macro: null,
+    plots: {},
+    unitSizes: {},
+    seatVacantSince: {},
   };
 }
 
@@ -117,7 +122,7 @@ export function smallCompany(seed = 1) {
 
   const division = makeUnit(state, 'division', root.id, { name: 'Division A' });
   division.divisionId = division.id;
-  state.divisions[division.id] = { unitId: division.id, industry: 'Food', revenue: 3_000_000, costs: 2_500_000, growth: 0.01, market: 1 };
+  state.divisions[division.id] = { unitId: division.id, industry: 'Food', revenue: 3_000_000, costs: 2_500_000, growth: 0.01, market: 1, scale: 3_000_000 };
   const head = makePerson(state, 'divisionHead', { unitId: division.id });
   division.leadId = head.id;
 

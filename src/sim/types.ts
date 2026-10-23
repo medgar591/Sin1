@@ -210,6 +210,11 @@ export interface DivisionStats {
   growth: number;
   /** Market demand multiplier, drifts with news; 1 is normal. */
   market: number;
+  /**
+   * Monthly revenue at output 100 and market 1. Calibrated when the game is
+   * generated, then compounds by `growth` every month.
+   */
+  scale: number;
 }
 
 export interface Clique {
@@ -221,6 +226,8 @@ export interface Clique {
   agenda: string;
   /** Revealed to the player through investigation. */
   known: boolean;
+  /** Recent promotion wins (+) and passed-over losses (-) of its members; decays monthly. */
+  momentum: number;
 }
 
 export type DirectorAgenda = 'growth' | 'safety' | 'dividends' | 'reform' | 'oldGuard';
@@ -277,11 +284,23 @@ export interface InboxOption {
   attention?: number;
 }
 
+/** What an inbox item's handler needs back when the player picks an option. */
+export interface InboxData {
+  /** raiseDemand: the raise asked for, as a fraction of salary. */
+  ask?: number;
+  /** poachOffer: the rival's yearly offer. */
+  offer?: number;
+  /** cliqueFormed: the faction. */
+  cliqueId?: CliqueId;
+}
+
+/** Handler key in the events registry: every incident kind, plus world events. */
+export type InboxKind = IncidentKind | 'talentWave';
+
 export interface InboxItem {
   id: string;
   month: Month;
-  /** Handler key in the events registry. */
-  kind: string;
+  kind: InboxKind;
   title: string;
   body: string;
   subjectIds: PersonId[];
@@ -291,8 +310,7 @@ export interface InboxItem {
   resolution: string | null;
   /** Unresolved items auto-resolve with their first option after this month. */
   expiresMonth: Month;
-  /** Free-form data the handler needs. Must stay JSON. */
-  data: Record<string, unknown>;
+  data: InboxData;
 }
 
 /**
@@ -300,29 +318,32 @@ export interface InboxItem {
  * player's attention. npc.ts (and others) push these; events.ts turns the
  * ones worth a decision into inbox items and clears the queue each month.
  */
-export type IncidentKind =
-  | 'raiseDemand'
-  | 'promotionDemand'
-  | 'feud'
-  | 'scheme'
-  | 'leak'
-  | 'embezzlement'
-  | 'breakthrough'
-  | 'scandal'
-  | 'resignationThreat'
-  | 'poachOffer'
-  | 'complaint'
-  | 'cliqueFormed'
-  | 'managerFiring';
-
-export interface Incident {
-  kind: IncidentKind;
+export type Incident = {
   /** Main actor first, then anyone else involved (target, rival, victim). */
   personIds: PersonId[];
+  /** The unit it happened in; for seatVacancy, the empty seat. */
   unitId: UnitId | null;
-  /** Kind-specific details. Must stay JSON. */
-  data: Record<string, unknown>;
-}
+} & (
+  | { kind: 'raiseDemand'; pct: number }
+  | { kind: 'promotionDemand' }
+  /** A division or function seat (or any lead seat above the asker) is empty. */
+  | { kind: 'seatVacancy' }
+  | { kind: 'feud' }
+  | { kind: 'scheme' }
+  | { kind: 'leak'; detail: string }
+  | { kind: 'embezzlement' }
+  | { kind: 'breakthrough'; detail: string }
+  | { kind: 'scandal' }
+  | { kind: 'resignationThreat' }
+  | { kind: 'poachOffer'; offer: number }
+  | { kind: 'complaint' }
+  | { kind: 'cliqueFormed'; cliqueId: CliqueId }
+  | { kind: 'managerFiring' }
+  /** A fixer job traced back to the company. */
+  | { kind: 'fixerFallout'; what: string }
+);
+
+export type IncidentKind = Incident['kind'];
 
 export interface LogEntry {
   month: Month;
@@ -343,8 +364,8 @@ export interface PlayerPromise {
   dueMonth: Month;
   detail: string;
   state: 'open' | 'kept' | 'broken';
-  /** Hidden bookkeeping: salary, rank or budget when the promise was made. */
-  baseline?: number;
+  /** Hidden bookkeeping: salary, role rank or budget when the promise was made. */
+  baseline: number;
 }
 
 export type FixerKind = 'materials' | 'specialHire' | 'dirt';
@@ -435,14 +456,28 @@ export interface GameState {
 
   /**
    * Recent leavers per unit (decays monthly); drags the unit's output while
-   * the team re-forms. Optional so older saves load.
+   * the team re-forms.
    */
-  unitChurn?: Record<UnitId, number>;
+  unitChurn: Record<UnitId, number>;
   /**
    * The business cycle. depth > 0 is a downturn (demand sits that far below
-   * normal until `until`), depth < 0 a boom. Optional so older saves load.
+   * normal until `until`), depth < 0 a boom. Null in normal times.
    */
-  macro?: MacroCycle;
+  macro: MacroCycle | null;
+  /** Campaigns by ambitious staff against their boss, keyed by the plotter. */
+  plots: Record<PersonId, Plot>;
+  /** The member headcount each unit is trying to keep; managers hire back up to it. */
+  unitSizes: Record<UnitId, number>;
+  /** Month each empty division or function seat first went vacant. */
+  seatVacantSince: Record<UnitId, number>;
+}
+
+export interface Plot {
+  targetId: PersonId;
+  /** 0–100. */
+  progress: number;
+  /** How many of the plot's milestones it has passed. */
+  stage: number;
 }
 
 export interface MacroCycle {

@@ -3,8 +3,9 @@ import type { FunctionKind, OrgUnit, Person, UnitKind } from '../sim/types';
 import { explainUnitOutput } from '../sim/economy';
 import { fullName, isActive, peopleUnder, unitAncestry, formatZuzu } from '../sim/org';
 import {
-  ATTENTION_COST, createUnit, dissolveUnit, hire, investigateUnit, mergeUnits, moveUnit, setBudget, type HireTier,
+  createUnit, dissolveUnit, hire, investigateUnit, mergeUnits, moveUnit, setBudget, type HireTier,
 } from '../sim/actions';
+import { ATTENTION_COST } from '../sim/attention';
 import { Bar, Btn, ConfirmBtn, KIND_LABEL, PersonLink, Seg, Sheet, Stepper, levelClass, personFlag, unitFlag, unitIntel } from './common';
 import { ALLOWED_PARENTS, UnitPicker, subtreeIds } from './pickers';
 import { closeSheet, game, openPerson, openUnit, run, setOrgUnit } from './store';

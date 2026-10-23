@@ -101,7 +101,7 @@ describe('runBoardMeeting', () => {
       adjustOpinion(f.state, d.personId, f.ceo.id, -60);
     }
     // The campaign has matured: only then do the plotter's allies move.
-    (f.state as unknown as { npcPlots: Record<string, unknown> }).npcPlots = { [plotter.id]: { targetId: f.ceo.id, progress: 90, stage: 2 } };
+    f.state.plots = { [plotter.id]: { targetId: f.ceo.id, progress: 90, stage: 2 } };
     runBoardMeeting(f.state, quarter({ boardConfidenceAfter: 55, boardConfidenceBefore: 55 }));
     expect(endGame).toHaveBeenCalled();
   });

@@ -6,24 +6,24 @@ import type {
   Clique,
   GameState,
   Incident,
-  IncidentKind,
   LifeEvent,
   Person,
   PersonId,
   RelTag,
   Role,
-  Secret,
   UnitId,
   OrgUnit,
 } from './types';
 import {
+  activeDirectors,
   activeStaff,
   addLifeEvent,
   addLog,
+  addSecret,
   adjustOpinion,
+  adjustSatisfaction,
   bossOf,
   chainOfCommand,
-  clamp,
   fullName,
   getRelation,
   isActive,
@@ -34,12 +34,17 @@ import {
   placeAsMember,
   pronoun,
   removeFromCompany,
-  setLead,
+  seatLead,
   setTag,
   unit,
+  unitAncestry,
 } from './org';
+import { marketSalary, roleForUnitKind, roleRank } from './roles';
+import { isSponsor } from './ties';
+import { PLOT_STAGES } from './plots';
 import { chance, gaussian, pick, random, randInt, weightedPick } from './rng';
-import { createPerson, marketSalary } from './generate';
+import { createPerson } from './generate';
+import { clamp, roundTo } from './util';
 
 /** Tuning knobs. Exported (and mutable) so tests and balancing can adjust them. */
 export const npcTuning = {
@@ -67,7 +72,6 @@ export const npcTuning = {
   plotGain: 0.6,
   plotCaughtChance: 0.02,
   plotNoticeChance: 0.55,
-  plotStages: [40, 75] as number[],
   /** A plot against the CEO works on this many directors a month, at this strength (scaled up as it matures). */
   plotBoardStep: 1.6,
   /** Whispering campaign: board confidence a mature plot against the CEO erodes each month. */
@@ -110,19 +114,9 @@ export const npcTuning = {
 };
 const T = npcTuning;
 
-/** Extra fields this module keeps on the otherwise-JSON game state. */
-interface Plot {
-  targetId: PersonId;
-  progress: number;
-  stage: number;
-}
-type NpcCliqueData = Clique & { momentum?: number };
-type NpcState = GameState & {
-  npcPlots?: Record<PersonId, Plot>;
-  npcUnitSizes?: Record<UnitId, number>;
-  /** Month each empty division/function seat first went vacant. */
-  npcSeatVacant?: Record<UnitId, number>;
-};
+type RaisedIncident = Exclude<Incident, { kind: 'fixerFallout' }>;
+/** An incident as npc code writes it: the unit defaults to the actor's. */
+type Raised = RaisedIncident extends infer I ? (I extends unknown ? Omit<I, 'unitId'> & { unitId?: UnitId | null } : never) : never;
 
 interface Candidate {
   incident: Incident;
@@ -130,25 +124,15 @@ interface Candidate {
   commit?: () => void;
 }
 interface Ctx {
-  s: NpcState;
+  s: GameState;
   out: Candidate[];
   pay: Map<PersonId, number>;
 }
 
-const RANK: Record<Role, number> = {
-  ceo: 10,
-  chair: 9,
-  director: 9,
-  officer: 8,
-  divisionHead: 6,
-  subdivisionHead: 5,
-  teamLead: 4,
-  subteamLead: 3,
-  worker: 1,
-};
-const KIND_WEIGHT: Record<IncidentKind, number> = {
+const KIND_WEIGHT: Record<RaisedIncident['kind'], number> = {
   raiseDemand: 3,
   promotionDemand: 4,
+  seatVacancy: 4,
   feud: 4,
   scheme: 6,
   leak: 5,
@@ -188,12 +172,12 @@ const BREAKTHROUGHS = [
 // ---------------------------------------------------------------- helpers
 
 const has = (p: Person, t: Person['traits'][number]): boolean => p.traits.includes(t);
-const rank = (p: Person): number => RANK[p.role];
-const isManager = (p: Person): boolean => rank(p) >= 3;
+const rank = (p: Person): number => roleRank[p.role];
+const isManager = (p: Person): boolean => rank(p) >= roleRank.subteamLead;
 const quality = (p: Person): number =>
   isManager(p) ? (p.skills.work + p.skills.management) / 2 : p.skills.work;
 const tenure = (ctx: Ctx, p: Person): number => ctx.s.month - p.hiredMonth;
-const roundPay = (n: number): number => Math.round(n / 500) * 500;
+const roundPay = (n: number): number => roundTo(n, 500);
 const isStaff = (p: Person | undefined): p is Person => !!p && isActive(p) && p.unitId !== null && p.role !== 'ceo';
 
 function marketPay(ctx: Ctx, p: Person): number {
@@ -237,40 +221,38 @@ function recentImpact(ctx: Ctx, p: Person): number {
   return sum;
 }
 
-function raise(ctx: Ctx, kind: IncidentKind, actor: Person, personIds: PersonId[], data: Record<string, unknown>, extra = 0, commit?: () => void): void {
+/** How much an actor's seniority adds to an incident's claim on the CEO's inbox. */
+const SENIORITY_PRIORITY: Record<Role, number> = {
+  worker: 1,
+  subteamLead: 3,
+  teamLead: 4,
+  subdivisionHead: 5,
+  divisionHead: 6,
+  officer: 8,
+  director: 9,
+  chair: 9,
+  ceo: 10,
+};
+
+function raise(ctx: Ctx, actor: Person, incident: Raised, extra = 0, commit?: () => void): void {
   ctx.out.push({
-    incident: { kind, personIds, unitId: actor.unitId, data },
-    priority: rank(actor) + KIND_WEIGHT[kind] + extra,
+    incident: { unitId: actor.unitId, ...incident } as Incident,
+    priority: SENIORITY_PRIORITY[actor.role] + KIND_WEIGHT[incident.kind] + extra,
     commit,
   });
 }
 
-function titleFor(role: Role, u: OrgUnit): string {
-  const label: Partial<Record<Role, string>> = {
-    teamLead: 'Team Lead',
-    subteamLead: 'Sub-team Lead',
-    subdivisionHead: 'Sub-division Head',
-  };
-  return label[role] ? `${label[role]}, ${u.name}` : `Staff, ${u.name}`;
-}
-
-function clique(s: NpcState, id: string | null): NpcCliqueData | null {
-  return id ? ((s.cliques[id] as NpcCliqueData | undefined) ?? null) : null;
+function clique(s: GameState, id: string | null): Clique | null {
+  return id ? (s.cliques[id] ?? null) : null;
 }
 
 /** Nearest active lead above a unit (including the unit's own lead). */
 function managerOfUnit(s: GameState, u: OrgUnit): Person | null {
-  let cur: OrgUnit | null = u;
-  while (cur) {
-    if (cur.leadId && isActive(person(s, cur.leadId))) return person(s, cur.leadId);
-    cur = cur.parentId ? unit(s, cur.parentId) : null;
+  for (const x of unitAncestry(s, u.id)) {
+    const lead = x.leadId ? s.people[x.leadId] : undefined;
+    if (lead && isActive(lead)) return lead;
   }
   return null;
-}
-
-function leave(ctx: Ctx, p: Person, status: 'quit' | 'defected' | 'fired', fate: string): void {
-  delete ctx.s.npcPlots?.[p.id];
-  removeFromCompany(ctx.s, p.id, status, fate);
 }
 
 // ----------------------------------------------------------- satisfaction
@@ -297,7 +279,7 @@ function driftLoyalty(ctx: Ctx, p: Person): void {
   const s = ctx.s;
   const regard = opinionOf(s, p.id, s.player.personId);
   let d = T.loyaltyDrift * ((p.satisfaction - 50) * 0.5 + regard * 0.3);
-  if (rank(p) >= RANK.divisionHead) d -= T.loyaltyErosion;
+  if (rank(p) >= roleRank.divisionHead) d -= T.loyaltyErosion;
   p.loyalty = clamp(p.loyalty + d);
 }
 
@@ -408,7 +390,7 @@ function escalateFeud(ctx: Ctx, a: Person, b: Person): void {
   addLifeEvent(ctx.s, a.id, 'feud', text(b), -3, false);
   addLifeEvent(ctx.s, b.id, 'feud', text(a), -3, false);
   addLog(ctx.s, `${fullName(a)} and ${fullName(b)} are in an open feud.`, 2, [a.id, b.id]);
-  raise(ctx, 'feud', rank(a) >= rank(b) ? a : b, [a.id, b.id], {});
+  raise(ctx, rank(a) >= rank(b) ? a : b, { kind: 'feud', personIds: [a.id, b.id] });
 }
 
 function protegeCount(s: GameState, p: Person): number {
@@ -451,18 +433,16 @@ function formRelation(ctx: Ctx, a: Person): void {
     adjustOpinion(s, hi.id, lo.id, Math.max(0, 40 - opinionOf(s, hi.id, lo.id)));
     adjustOpinion(s, lo.id, hi.id, Math.max(0, 45 - opinionOf(s, lo.id, hi.id)));
     addLifeEvent(s, lo.id, 'mentor', `${fullName(hi)} took ${pronoun(lo, 'object')} under ${pronoun(hi, 'possessive')} wing.`, 3, false);
-    if (rank(hi) >= 6) addLog(s, `${fullName(hi)} is mentoring ${fullName(lo)}.`, 1, [hi.id, lo.id]);
+    if (rank(hi) >= roleRank.divisionHead) addLog(s, `${fullName(hi)} is mentoring ${fullName(lo)}.`, 1, [hi.id, lo.id]);
   }
 }
 
 function addAffair(ctx: Ctx, a: Person, b: Person): void {
   for (const [x, y] of [[a, b], [b, a]] as const) {
-    x.secrets.push({
-      id: newId(ctx.s, 'sec'),
+    addSecret(ctx.s, x.id, {
       kind: 'affair',
       description: `Is in an undisclosed relationship with ${fullName(y)} across the reporting line.`,
       severity: 2,
-      revealed: false,
       involvedIds: [y.id],
     });
   }
@@ -521,7 +501,7 @@ function undermine(ctx: Ctx, p: Person): void {
   }
   t ??= pickAssociate(ctx, p) ?? undefined;
   if (!t || t.id === p.id || !isStaff(t)) return;
-  t.satisfaction = clamp(t.satisfaction - 3);
+  adjustSatisfaction(s, t.id, -3);
   const tb = bossOf(s, t.id);
   if (tb && tb !== p.id) adjustOpinion(s, tb, t.id, -3);
   adjustOpinion(s, t.id, p.id, -6);
@@ -536,8 +516,8 @@ function undermine(ctx: Ctx, p: Person): void {
 function court(ctx: Ctx, p: Person): void {
   const s = ctx.s;
   const gain = 2 + p.skills.guile / 40;
-  if (rank(p) >= 6) {
-    const dirs = s.directors.map((d) => s.people[d.personId]).filter((d) => d && isActive(d));
+  if (rank(p) >= roleRank.divisionHead) {
+    const dirs = activeDirectors(s);
     if (dirs.length) {
       adjustOpinion(s, pick(s, dirs).id, p.id, gain);
       return;
@@ -551,7 +531,7 @@ function court(ctx: Ctx, p: Person): void {
 function cliqueWork(ctx: Ctx, p: Person): void {
   const s = ctx.s;
   const friends = Object.entries(s.relations[p.id] ?? {})
-    .filter(([oid, r]) => r.opinion >= 25 && isStaff(s.people[oid]) && !s.people[oid].cliqueId && oid !== p.id)
+    .filter(([oid, r]) => r.opinion >= 25 && isStaff(s.people[oid]) && !s.people[oid].cliqueId)
     .map(([oid]) => s.people[oid]);
   const own = clique(s, p.cliqueId);
   if (own) {
@@ -565,7 +545,7 @@ function cliqueWork(ctx: Ctx, p: Person): void {
   if (!friends.length || Object.keys(s.cliques).length >= T.maxCliques) return;
   const members = friends.slice(0, randInt(s, 1, 2));
   const id = newId(s, 'cl');
-  const c: NpcCliqueData = {
+  const c: Clique = {
     id,
     name: `The ${pick(s, CLIQUE_A)} ${pick(s, CLIQUE_B)}`,
     leaderId: p.id,
@@ -577,26 +557,22 @@ function cliqueWork(ctx: Ctx, p: Person): void {
   s.cliques[id] = c;
   for (const id2 of c.memberIds) person(s, id2).cliqueId = id;
   addLog(s, `${fullName(p)} has gathered a clique.`, 1, c.memberIds);
-  raise(ctx, 'cliqueFormed', p, c.memberIds, { cliqueId: id }, c.memberIds.length >= 3 ? 1 : 0);
+  raise(ctx, p, { kind: 'cliqueFormed', personIds: c.memberIds, cliqueId: id }, c.memberIds.length >= 3 ? 1 : 0);
 }
 
 function leak(ctx: Ctx, p: Person): void {
   addLog(ctx.s, `${fullName(p)} passed internal material to an outside party.`, 2, [p.id]);
   addLifeEvent(ctx.s, p.id, 'leak', 'Leaked internal material to an outside party.', 0, false);
-  raise(ctx, 'leak', p, [p.id], { description: `${fullName(p)} is suspected of passing internal material to a rival corporation.` });
+  raise(ctx, p, { kind: 'leak', personIds: [p.id], detail: `${fullName(p)} is suspected of passing internal material to a rival corporation.` });
 }
 
 function embezzle(ctx: Ctx, p: Person): void {
   const s = ctx.s;
-  const sec: Secret = {
-    id: newId(s, 'sec'),
+  addSecret(s, p.id, {
     kind: 'embezzlement',
     description: `Has been skimming from ${pronoun(p, 'possessive')} unit's discretionary funds.`,
     severity: chance(s, 0.3) ? 3 : 2,
-    revealed: false,
-    involvedIds: [],
-  };
-  p.secrets.push(sec);
+  });
   s.company.cash -= randInt(s, 5_000, 40_000);
 }
 
@@ -606,53 +582,27 @@ function discoverEmbezzlement(ctx: Ctx, p: Person): void {
   sec.revealed = true;
   addLifeEvent(ctx.s, p.id, 'scandal', 'Caught skimming funds.', -8, false);
   addLog(ctx.s, `Audit flags missing funds in ${fullName(p)}'s unit.`, 2, [p.id]);
-  raise(ctx, 'embezzlement', p, [p.id], { secretId: sec.id });
+  raise(ctx, p, { kind: 'embezzlement', personIds: [p.id] });
 }
 
 // ------------------------------------------------------------- plotting
 
-/** Progress (0-100) of the plot this person is running against their boss, if any. */
-export function plotProgress(state: GameState, personId: PersonId): number | null {
-  return (state as NpcState).npcPlots?.[personId]?.progress ?? null;
-}
-
-/** The person's campaign loses `amount` progress; at zero it is over. Returns true if a plot was hit. */
-export function setbackPlot(state: GameState, personId: PersonId, amount: number): boolean {
-  const plots = (state as NpcState).npcPlots;
-  const plot = plots?.[personId];
-  if (!plots || !plot) return false;
-  plot.progress -= amount;
-  if (plot.progress <= 0) delete plots[personId];
-  else plot.stage = T.plotStages.filter((th) => th <= plot.progress).length;
-  return true;
-}
-
-/** Ends the person's campaign outright (caught, won over, or frightened off). */
-export function endPlot(state: GameState, personId: PersonId): boolean {
-  const plots = (state as NpcState).npcPlots;
-  if (!plots?.[personId]) return false;
-  delete plots[personId];
-  return true;
-}
-
-const plotsOf = (s: NpcState): Record<PersonId, Plot> => (s.npcPlots ??= {});
-
 function maybeStartPlot(ctx: Ctx, p: Person): void {
   const s = ctx.s;
-  if (p.ambition < T.plotMinAmbition || p.involvement < T.plotMinInvolvement || plotsOf(s)[p.id]) return;
+  if (p.ambition < T.plotMinAmbition || p.involvement < T.plotMinInvolvement || s.plots[p.id]) return;
   const bossId = bossOf(s, p.id);
   if (!bossId) return;
   const resentment = -opinionOf(s, p.id, bossId) + (50 - p.loyalty) * 0.5 + (55 - p.satisfaction) * 0.3;
   if (resentment <= 0) return;
   const c = T.plotBase * (p.ambition / 100) * (p.involvement / 100) * (resentment / 30) * (0.6 + p.skills.guile / 100) * traitMult(p);
   if (!chance(s, c)) return;
-  plotsOf(s)[p.id] = { targetId: bossId, progress: 0, stage: 0 };
+  s.plots[p.id] = { targetId: bossId, progress: 0, stage: 0 };
   if (!clique(s, p.cliqueId) && Object.keys(s.cliques).length < T.maxCliques) cliqueWork(ctx, p);
 }
 
 function runPlots(ctx: Ctx): void {
   const s = ctx.s;
-  const plots = plotsOf(s);
+  const plots = s.plots;
   for (const [pid, plot] of Object.entries(plots)) {
     const p = s.people[pid];
     const t = s.people[plot.targetId];
@@ -661,12 +611,12 @@ function runPlots(ctx: Ctx): void {
       continue;
     }
     const cl = clique(s, p.cliqueId);
-    const supporters = cl ? cl.memberIds.filter((m) => m !== pid && isStaff(s.people[m])) : [];
+    const supporters = cl ? cl.memberIds.filter((m) => m !== pid && m !== plot.targetId && isStaff(s.people[m])) : [];
     plot.progress = Math.min(100, plot.progress + (T.plotGain + p.skills.guile / 50 + supporters.length * 0.2) * (0.5 + random(s)));
 
     if (t.role === 'ceo') {
       // Officers work on directors against the CEO, harder as the campaign matures.
-      const dirs = s.directors.map((d) => s.people[d.personId]).filter((d) => d && isActive(d));
+      const dirs = activeDirectors(s);
       const step = T.plotBoardStep * (0.5 + plot.progress / 60);
       for (let i = 0; i < Math.min(2, dirs.length); i++) {
         const d = pick(s, dirs);
@@ -690,10 +640,10 @@ function runPlots(ctx: Ctx): void {
         adjustOpinion(s, tb, t.id, -1.2);
         adjustOpinion(s, tb, p.id, 1);
       }
-      for (const m of supporters) if (m !== t.id) adjustOpinion(s, m, t.id, -0.8);
+      for (const m of supporters) adjustOpinion(s, m, t.id, -0.8);
     }
 
-    const target = rank(t) >= 8 ? 8 : 0;
+    const target = rank(t) >= roleRank.officer ? 8 : 0;
     const caught = T.plotCaughtChance + (has(t, 'paranoid') ? 0.02 : 0) + t.skills.guile / 3000;
     if (t.role !== 'ceo' && chance(s, caught)) {
       adjustOpinion(s, t.id, p.id, -35);
@@ -701,56 +651,56 @@ function runPlots(ctx: Ctx): void {
       adjustOpinion(s, p.id, t.id, -10);
       addLifeEvent(s, p.id, 'plotExposed', `${fullName(t)} found out about ${pronoun(p, 'possessive')} campaign.`, -4, false);
       addLog(s, `${fullName(p)}'s campaign against ${fullName(t)} was exposed.`, 2, [p.id, t.id]);
-      raise(ctx, 'scheme', p, [p.id, t.id], { targetId: t.id, exposed: true }, target);
+      raise(ctx, p, { kind: 'scheme', personIds: [p.id, t.id] }, target);
       delete plots[pid];
       continue;
     }
 
-    const stages = T.plotStages;
-    if (plot.stage < stages.length && plot.progress >= stages[plot.stage]) {
+    if (plot.stage < PLOT_STAGES.length && plot.progress >= PLOT_STAGES[plot.stage]) {
       plot.stage++;
-      if (chance(s, T.plotNoticeChance)) raise(ctx, 'scheme', p, [p.id, t.id], { targetId: t.id, progress: Math.round(plot.progress) }, target + (t.role === 'ceo' ? 8 : 0));
+      if (chance(s, T.plotNoticeChance)) raise(ctx, p, { kind: 'scheme', personIds: [p.id, t.id] }, target + (t.role === 'ceo' ? 8 : 0));
     }
-    if (plot.progress >= 100) concludePlot(ctx, p, t, plots);
+    if (plot.progress >= 100) concludePlot(ctx, p, t);
   }
 }
 
-function concludePlot(ctx: Ctx, p: Person, t: Person, plots: Record<PersonId, Plot>): void {
+function concludePlot(ctx: Ctx, p: Person, t: Person): void {
   const s = ctx.s;
   const tu = t.unitId ? unit(s, t.unitId) : null;
-  const seatLevel = t.role === 'teamLead' || t.role === 'subteamLead' || t.role === 'subdivisionHead';
+  const seatLevel = rank(t) >= roleRank.subteamLead && rank(t) <= roleRank.subdivisionHead;
   if (!seatLevel || !tu || tu.leadId !== t.id) {
     // Higher seats are the player's to rule on; keep pressing.
-    if (chance(ctx.s, 0.3)) raise(ctx, 'scheme', p, [p.id, t.id], { targetId: t.id, progress: 100, ripe: true }, t.role === 'ceo' ? 12 : 6);
+    if (chance(ctx.s, 0.3)) raise(ctx, p, { kind: 'scheme', personIds: [p.id, t.id] }, t.role === 'ceo' ? 12 : 6);
     return;
   }
   const tb = bossOf(s, t.id);
   if (!tb || opinionOf(s, tb, p.id) < opinionOf(s, tb, t.id)) {
-    plots[p.id].progress = 60; // the boss isn't convinced yet
+    s.plots[p.id].progress = 60; // the boss isn't convinced yet
     return;
   }
-  leave(ctx, t, 'fired', `Pushed out of ${tu.name} after a quiet campaign by ${fullName(p)}.`);
+  removeFromCompany(ctx.s, t.id, 'fired', `Pushed out of ${tu.name} after a quiet campaign by ${fullName(p)}.`);
   addLifeEvent(s, t.id, 'fired', `Removed as lead of ${tu.name}.`, -8, false);
-  setLead(s, tu.id, p.id);
-  p.title = titleFor(p.role, tu);
+  seatLead(s, tu.id, p.id);
   addLifeEvent(s, p.id, 'promoted', `Took over ${tu.name} after unseating ${fullName(t)}.`, 8, false);
   addLog(s, `${fullName(p)} replaced ${fullName(t)} as head of ${tu.name}.`, 2, [p.id, t.id]);
-  delete plots[p.id];
+  delete s.plots[p.id];
 }
 
 // ---------------------------------------------------------- managers
 
+/** Would `m` shield `w` from dismissal? Sponsors, friends and lovers, or anyone who thinks highly of them. */
 function isProtector(s: GameState, m: Person, w: Person): boolean {
+  if (isSponsor(s, m.id, w.id)) return true;
   const fwd = getRelation(s, m.id, w.id);
   const back = getRelation(s, w.id, m.id);
-  const strong = (t: RelTag | null | undefined) => t === 'mentor' || t === 'protege' || t === 'lover' || t === 'friend';
-  return !!((fwd && (fwd.opinion >= T.protectOpinion || strong(fwd.tag))) || (back && strong(back.tag)));
+  const close = (t: RelTag | null | undefined) => t === 'lover' || t === 'friend';
+  return !!((fwd && (fwd.opinion >= T.protectOpinion || close(fwd.tag))) || (back && close(back.tag)));
 }
 
 function reviewPerformance(ctx: Ctx, p: Person): void {
   const s = ctx.s;
   if (p.performance >= T.firePerformance || tenure(ctx, p) < T.fireMinTenure) return;
-  if (rank(p) >= 6) return; // division heads and officers are the player's call
+  if (rank(p) >= roleRank.divisionHead) return; // division heads and officers are the player's call
   const mgrId = bossOf(s, p.id);
   if (!mgrId) return;
   const mgr = person(s, mgrId);
@@ -776,20 +726,19 @@ function reviewPerformance(ctx: Ctx, p: Person): void {
   if (protector) return protect(ctx, p, mgr, protector);
 
   const interesting = isManager(p) || tenure(ctx, p) >= 48 || p.involvement >= 50 || chance(s, 0.1);
-  leave(ctx, p, 'fired', 'Dismissed for sustained poor performance.');
+  removeFromCompany(ctx.s, p.id, 'fired', 'Dismissed for sustained poor performance.');
   addLifeEvent(s, p.id, 'fired', `Dismissed by ${fullName(mgr)} for poor performance.`, -8, false);
   addLog(s, `${fullName(mgr)} dismissed ${fullName(p)} for poor performance.`, interesting ? 2 : 1, [mgr.id, p.id]);
-  if (interesting) raise(ctx, 'managerFiring', mgr, [mgr.id, p.id], { action: 'fired' });
+  if (interesting) raise(ctx, mgr, { kind: 'managerFiring', personIds: [mgr.id, p.id] });
 }
 
 function protect(ctx: Ctx, p: Person, mgr: Person, protector: Person): void {
   const s = ctx.s;
   const skip = protector.id !== mgr.id;
   const dest = protector.unitId ? unit(s, protector.unitId) : null;
-  const pull = skip && dest && p.unitId !== dest.id && dest.leadId === protector.id && chance(s, T.pullChance);
-  if (pull && dest) {
+  if (skip && dest && p.unitId !== dest.id && dest.leadId === protector.id && chance(s, T.pullChance)) {
     placeAsMember(s, p.id, dest.id);
-    p.satisfaction = clamp(p.satisfaction + 5);
+    adjustSatisfaction(s, p.id, 5);
     adjustOpinion(s, mgr.id, protector.id, -4);
     addLifeEvent(s, p.id, 'transferred', `${fullName(protector)} brought ${pronoun(p, 'object')} into ${dest.name}.`, 3, false);
     addLog(s, `${fullName(protector)} pulled ${fullName(p)} into ${dest.name} rather than let ${fullName(mgr)} dismiss ${pronoun(p, 'object')}.`, 2, [protector.id, p.id, mgr.id]);
@@ -822,7 +771,7 @@ function fillVacancies(ctx: Ctx): void {
   const s = ctx.s;
   for (const u of Object.values(s.units)) {
     if (u.leadId !== null || u.kind === 'executive') {
-      if (s.npcSeatVacant) delete s.npcSeatVacant[u.id];
+      delete s.seatVacantSince[u.id];
       continue;
     }
     if (u.kind === 'division' || u.kind === 'function') {
@@ -846,21 +795,20 @@ function fillVacancies(ctx: Ctx): void {
 
 function promote(ctx: Ctx, u: OrgUnit, promoter: Person, winner: Person, cands: Person[]): void {
   const s = ctx.s;
-  setLead(s, u.id, winner.id);
-  winner.title = titleFor(winner.role, u);
+  seatLead(s, u.id, winner.id);
   winner.salary = Math.max(winner.salary, roundPay(marketSalary(winner.role, quality(winner), s.month) * 0.95));
-  winner.satisfaction = clamp(winner.satisfaction + 10);
+  adjustSatisfaction(s, winner.id, 10);
   addLifeEvent(s, winner.id, 'promoted', `Promoted to lead ${u.name}.`, 8, false);
   adjustOpinion(s, winner.id, promoter.id, 5);
   addLog(s, `${fullName(promoter)} promoted ${fullName(winner)} to lead ${u.name}.`, 1, [promoter.id, winner.id]);
 
   const wc = clique(s, winner.cliqueId);
-  if (wc) wc.momentum = (wc.momentum ?? 0) + 1;
+  if (wc) wc.momentum += 1;
   for (const c of cands) {
     if (c.id === winner.id || c.ambition < T.passedOverAmbition || c.performance < 40 || !isActive(c)) continue;
     adjustOpinion(s, c.id, promoter.id, -6 * (c.ambition / 100) - 2);
     adjustOpinion(s, c.id, winner.id, -5);
-    c.satisfaction = clamp(c.satisfaction - 6);
+    adjustSatisfaction(s, c.id, -6);
     addLifeEvent(s, c.id, 'passedOver', `Passed over for the lead of ${u.name}.`, -4, false);
     if (winner.ambition >= 50 && !getRelation(s, c.id, winner.id)?.tag && chance(s, 0.4)) {
       setTag(s, c.id, winner.id, 'rival');
@@ -868,18 +816,16 @@ function promote(ctx: Ctx, u: OrgUnit, promoter: Person, winner: Person, cands: 
       adjustOpinion(s, winner.id, c.id, -5);
     }
     const cc = clique(s, c.cliqueId);
-    if (cc && cc.id !== winner.cliqueId) cc.momentum = (cc.momentum ?? 0) - 0.5;
+    if (cc && cc.id !== winner.cliqueId) cc.momentum -= 0.5;
   }
 }
 
 function hireLead(ctx: Ctx, u: OrgUnit, boss: Person): void {
   const s = ctx.s;
-  const role: Role = u.kind === 'team' ? 'teamLead' : u.kind === 'subteam' ? 'subteamLead' : 'subdivisionHead';
   const q = clamp(50 + (boss.skills.management - 50) * 0.3, 25, 85);
-  const p = createPerson(s, { role, quality: q });
+  const p = createPerson(s, { role: roleForUnitKind[u.kind], quality: q });
   p.hiredMonth = s.month;
-  setLead(s, u.id, p.id);
-  p.title = titleFor(role, u);
+  seatLead(s, u.id, p.id);
   addLifeEvent(s, p.id, 'hired', `Hired from outside to lead ${u.name}.`, 3, false);
   addLog(s, `${fullName(boss)} brought in ${fullName(p)} from outside to lead ${u.name}.`, 1, [boss.id, p.id]);
 }
@@ -891,7 +837,7 @@ function hireLead(ctx: Ctx, u: OrgUnit, boss: Person): void {
  */
 function autofillSeat(ctx: Ctx, u: OrgUnit): boolean {
   const s = ctx.s;
-  const since = ((s.npcSeatVacant ??= {})[u.id] ??= s.month);
+  const since = (s.seatVacantSince[u.id] ??= s.month);
   if (s.month - since < T.seatAutofillMonths) return false;
   const ceo = s.people[s.player.personId];
   const cands = peopleUnder(s, u.id)
@@ -904,7 +850,7 @@ function autofillSeat(ctx: Ctx, u: OrgUnit): boolean {
   const from = best.unitId ? unit(s, best.unitId) : null;
   promote(ctx, u, ceo, best, []);
   best.title = `Acting Head, ${u.name}`;
-  delete s.npcSeatVacant[u.id];
+  delete s.seatVacantSince[u.id];
   addLog(s, `With the seat of ${u.name} still empty, the company installed ${fullName(best)} as acting head${wasLead && from ? `; ${from.name} loses its lead` : ''}.`, 2, [best.id]);
   return true;
 }
@@ -919,14 +865,14 @@ function demandSeat(ctx: Ctx, u: OrgUnit): void {
   if (!cands.length) return;
   const score = (c: Person) => c.performance * 0.5 + c.skills.management * 0.3 + c.ambition * 0.2 + rank(c) * 3;
   const best = cands.reduce((a, b) => (score(b) > score(a) ? b : a));
-  raise(ctx, 'promotionDemand', best, [best.id], { vacantUnitId: u.id }, 8, () =>
+  raise(ctx, best, { kind: 'seatVacancy', personIds: [best.id], unitId: u.id }, 8, () =>
     addLifeEvent(s, best.id, 'seatDemand', `Asked for the lead of ${u.name}.`, 0, false),
   );
 }
 
 function hireToSize(ctx: Ctx): void {
   const s = ctx.s;
-  const sizes = (s.npcUnitSizes ??= {});
+  const sizes = s.unitSizes;
   for (const u of Object.values(s.units)) {
     const want = sizes[u.id];
     if (want === undefined || u.memberIds.length > want) {
@@ -941,7 +887,6 @@ function hireToSize(ctx: Ctx): void {
     p.salary = roundPay(marketSalary('worker', p.skills.work, s.month));
     p.hiredMonth = s.month;
     placeAsMember(s, p.id, u.id);
-    if (!p.title || p.title === 'worker') p.title = titleFor('worker', u);
     addLifeEvent(s, p.id, 'hired', `Hired into ${u.name} by ${fullName(mgr)}.`, 3, false);
     addLog(s, `${fullName(mgr)} hired ${fullName(p)} into ${u.name}.`, 1, [mgr.id, p.id]);
   }
@@ -960,7 +905,7 @@ function giveRaises(ctx: Ctx): void {
     const amount = Math.max(500, roundPay(c.salary * (0.03 + random(s) * 0.03)));
     if (amount / 12 > u.budget * 0.1) continue;
     c.salary += amount;
-    c.satisfaction = clamp(c.satisfaction + 4);
+    adjustSatisfaction(s, c.id, 4);
     addLifeEvent(s, c.id, 'raise', `Given a raise by ${fullName(mgr)}.`, 2, false);
     adjustOpinion(s, c.id, mgr.id, 2);
   }
@@ -974,38 +919,28 @@ function requests(ctx: Ctx, p: Person): void {
   const ratio = p.salary / Math.max(1, marketPay(ctx, p));
   if (lead && ratio < 0.9 && p.ambition >= 45 && !recent(ctx, p, 'raiseAsked', 6) && chance(s, T.raiseDemandChance * (0.5 + p.greed / 100))) {
     const amount = roundPay(marketPay(ctx, p) - p.salary);
-    raise(ctx, 'raiseDemand', p, [p.id], { amount, pct: amount / p.salary }, 0, () => addLifeEvent(s, p.id, 'raiseAsked', 'Asked for a raise.', 0, false));
+    raise(ctx, p, { kind: 'raiseDemand', personIds: [p.id], pct: amount / p.salary }, 0, () => addLifeEvent(s, p.id, 'raiseAsked', 'Asked for a raise.', 0, false));
   }
   if (!lead && p.ambition >= 65 && p.performance >= 65 && p.satisfaction < 55 && tenure(ctx, p) >= 24) {
     const promoted = lastEvent(p, 'promoted');
     const since = s.month - Math.max(p.hiredMonth, promoted?.month ?? -999);
     if (since >= 24 && !recent(ctx, p, 'promotionAsked', 8) && chance(s, T.promotionDemandChance)) {
-      const seat = unitAncestryVacant(s, p);
-      raise(ctx, 'promotionDemand', p, [p.id], seat ? { vacantUnitId: seat } : {}, 0, () =>
-        addLifeEvent(s, p.id, 'promotionAsked', 'Asked to be considered for promotion.', 0, false),
-      );
+      const seat = unitAncestry(s, p.unitId!).find((x) => x.leadId === null && x.kind !== 'executive');
+      const asked = () => addLifeEvent(s, p.id, 'promotionAsked', 'Asked to be considered for promotion.', 0, false);
+      if (seat) raise(ctx, p, { kind: 'seatVacancy', personIds: [p.id], unitId: seat.id }, 0, asked);
+      else raise(ctx, p, { kind: 'promotionDemand', personIds: [p.id] }, 0, asked);
     }
   }
   const valuable = p.performance >= 60 || p.skills.work >= 65 || lead;
   if (valuable && p.satisfaction < 35 && !recent(ctx, p, 'resignThreat', 6) && chance(s, T.resignThreatChance)) {
-    raise(ctx, 'resignationThreat', p, [p.id], {}, 0, () => addLifeEvent(s, p.id, 'resignThreat', 'Threatened to resign.', -1, false));
+    raise(ctx, p, { kind: 'resignationThreat', personIds: [p.id] }, 0, () => addLifeEvent(s, p.id, 'resignThreat', 'Threatened to resign.', -1, false));
   }
   if (p.role === 'worker' && p.satisfaction < 45 && !recent(ctx, p, 'complained', 8)) {
     const bossId = bossOf(s, p.id);
     if (bossId && opinionOf(s, p.id, bossId) <= -40 && chance(s, T.complaintChance)) {
-      raise(ctx, 'complaint', p, [p.id, bossId], {}, 0, () => addLifeEvent(s, p.id, 'complained', `Filed a complaint against ${fullName(person(s, bossId))}.`, -1, false));
+      raise(ctx, p, { kind: 'complaint', personIds: [p.id, bossId] }, 0, () => addLifeEvent(s, p.id, 'complained', `Filed a complaint against ${fullName(person(s, bossId))}.`, -1, false));
     }
   }
-}
-
-/** A vacant lead seat somewhere above the person, if any. */
-function unitAncestryVacant(s: GameState, p: Person): UnitId | null {
-  let u: OrgUnit | null = unit(s, p.unitId!);
-  while (u) {
-    if (u.leadId === null && u.kind !== 'executive') return u.id;
-    u = u.parentId ? unit(s, u.parentId) : null;
-  }
-  return null;
 }
 
 // ------------------------------------------------------------ leaving
@@ -1023,20 +958,20 @@ function leaving(ctx: Ctx, p: Person): void {
     const offered = lastEvent(p, 'poachOffer');
     if (!offered || s.month - offered.month > 4) {
       const salary = roundPay(marketPay(ctx, p) * 1.25);
-      raise(ctx, 'poachOffer', p, [p.id], { rivalCorp: corp, salary, offer: salary }, 0, () =>
+      raise(ctx, p, { kind: 'poachOffer', personIds: [p.id], offer: salary }, 0, () =>
         addLifeEvent(s, p.id, 'poachOffer', `Received an offer from ${corp}.`, 0, false),
       );
       return;
     }
     if (s.month - offered.month < 1) return;
     addLifeEvent(s, p.id, 'defected', `Left for ${corp}.`, -2, false);
-    addLog(s, `${fullName(p)} left the company for ${corp}.`, rank(p) >= 4 ? 3 : 2, [p.id]);
-    leave(ctx, p, 'defected', `Joined ${corp} on a better offer.`);
+    addLog(s, `${fullName(p)} left the company for ${corp}.`, rank(p) >= roleRank.teamLead ? 3 : 2, [p.id]);
+    removeFromCompany(ctx.s, p.id, 'defected', `Joined ${corp} on a better offer.`);
     return;
   }
   addLifeEvent(s, p.id, 'quit', 'Resigned.', -2, false);
-  addLog(s, `${fullName(p)} resigned.`, rank(p) >= 3 ? 2 : 1, [p.id]);
-  leave(ctx, p, 'quit', pick(s, QUIT_FATES));
+  addLog(s, `${fullName(p)} resigned.`, isManager(p) ? 2 : 1, [p.id]);
+  removeFromCompany(ctx.s, p.id, 'quit', pick(s, QUIT_FATES));
 }
 
 // --------------------------------------------- breakthroughs, scandals
@@ -1046,11 +981,12 @@ function breakthroughOrScandal(ctx: Ctx, p: Person): void {
   const diligent = has(p, 'diligent');
   if (p.skills.work >= 70 && p.performance >= 70 && chance(s, diligent ? T.breakthroughChance : T.breakthroughChance / 4)) {
     const description = pick(s, BREAKTHROUGHS);
-    p.satisfaction = clamp(p.satisfaction + 10);
-    unit(s, p.unitId!).morale = clamp(unit(s, p.unitId!).morale + 2);
+    adjustSatisfaction(s, p.id, 10);
+    const u = unit(s, p.unitId!);
+    u.morale = clamp(u.morale + 2);
     addLifeEvent(s, p.id, 'breakthrough', description, 6, false);
     addLog(s, `${fullName(p)}: ${description}`, 2, [p.id]);
-    raise(ctx, 'breakthrough', p, [p.id], { description });
+    raise(ctx, p, { kind: 'breakthrough', personIds: [p.id], detail: description });
   }
   for (const sec of p.secrets) {
     if (sec.revealed || sec.kind === 'embezzlement') continue;
@@ -1065,20 +1001,20 @@ function breakthroughOrScandal(ctx: Ctx, p: Person): void {
         others.push(id);
       }
     }
-    p.satisfaction = clamp(p.satisfaction - 5);
+    adjustSatisfaction(s, p.id, -5);
     addLifeEvent(s, p.id, 'scandal', sec.description, -4 * sec.severity, false);
     addLog(s, `Scandal: ${fullName(p)}. ${sec.description}`, 3, [p.id, ...others]);
-    raise(ctx, 'scandal', p, [p.id, ...others], { secretId: sec.id }, sec.severity);
+    raise(ctx, p, { kind: 'scandal', personIds: [p.id, ...others] }, sec.severity);
     break;
   }
 }
 
 // ------------------------------------------------------------- upkeep
 
-function cliqueUpkeep(s: NpcState): void {
-  for (const c of Object.values(s.cliques) as NpcCliqueData[]) {
+function cliqueUpkeep(s: GameState): void {
+  for (const c of Object.values(s.cliques)) {
     c.memberIds = c.memberIds.filter((id) => isActive(person(s, id)));
-    c.momentum = (c.momentum ?? 0) * 0.9;
+    c.momentum *= 0.9;
     if (c.memberIds.length < 2) {
       for (const id of c.memberIds) person(s, id).cliqueId = null;
       delete s.cliques[c.id];
@@ -1100,7 +1036,7 @@ function flush(ctx: Ctx): void {
 }
 
 export function runNpcMonth(state: GameState): void {
-  const ctx: Ctx = { s: state as NpcState, out: [], pay: new Map() };
+  const ctx: Ctx = { s: state, out: [], pay: new Map() };
   const s = ctx.s;
   const live = (p: Person) => isStaff(p);
   const staff = activeStaff(s).filter(live);

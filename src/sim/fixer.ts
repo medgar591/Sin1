@@ -1,10 +1,13 @@
 // Fixer requests: a stripped-down Sinless run. The player asks for scarce
 // materials, a special hire extracted from elsewhere, or dirt on someone,
 // sets a budget and whether it must be clean, and gets a report later.
-import type { ActionResult, FixerJob, FixerKind, GameState, PersonId, Secret, UnitId } from './types';
-import { addLifeEvent, addLog, adjustLoyalty, clamp, formatZuzu, fullName, newId, person, placeAsMember, unit } from './org';
+import type { ActionResult, FixerJob, FixerKind, GameState, PersonId, UnitId } from './types';
+import { addLifeEvent, addLog, addSecret, adjustLoyalty, formatZuzu, fullName, isActive, newId, person, placeAsMember, pronoun, unit } from './org';
 import { chance, randInt, random, rollPool } from './rng';
 import { createPerson } from './generate';
+import { attentionCost, trySpend } from './attention';
+import { MARKET_MAX, MARKET_MIN } from './economy';
+import { clamp, fail, ok } from './util';
 
 export interface FixerRequest {
   kind: FixerKind;
@@ -97,18 +100,18 @@ function divisionOf(state: GameState, unitId: UnitId | null): UnitId | null {
 /** Pays the budget from company cash, spends attention, and queues the job. */
 export function startFixerJob(state: GameState, request: FixerRequest): ActionResult {
   const q = quoteFixerJob(state, request);
-  if (request.budget < q.minBudget) return { ok: false, message: `The fixer wants at least ${formatZuzu(q.minBudget)} for this.` };
-  if (request.budget > state.company.cash) return { ok: false, message: 'The company cannot cover that budget.' };
-  if (request.kind === 'materials' && !divisionOf(state, request.targetUnitId)) return { ok: false, message: 'Materials need a division to deliver to.' };
-  if (request.kind === 'specialHire' && !(request.targetUnitId && state.units[request.targetUnitId])) return { ok: false, message: 'A specialist needs a unit to join.' };
+  if (request.budget < q.minBudget) return fail(`The fixer wants at least ${formatZuzu(q.minBudget)} for this.`);
+  if (request.budget > state.company.cash) return fail('The company cannot cover that budget.');
+  if (request.kind === 'materials' && !divisionOf(state, request.targetUnitId)) return fail('Materials need a division to deliver to.');
+  if (request.kind === 'specialHire' && !(request.targetUnitId && state.units[request.targetUnitId])) return fail('A specialist needs a unit to join.');
   if (request.kind === 'dirt') {
     const t = request.targetPersonId ? state.people[request.targetPersonId] : undefined;
-    if (!t || t.status !== 'active') return { ok: false, message: 'Dirt needs a target still with the company.' };
-    if (t.id === state.player.personId) return { ok: false, message: 'You do not need a fixer to dig on yourself.' };
+    if (!t || !isActive(t)) return fail('Dirt needs a target still with the company.');
+    if (t.id === state.player.personId) return fail('You do not need a fixer to dig on yourself.');
   }
-  if (state.player.attentionLeft < 1) return { ok: false, message: 'No attention left this month.' };
+  const blocked = trySpend(state, attentionCost(state, 'fixer'));
+  if (blocked) return blocked;
 
-  state.player.attentionLeft -= 1;
   state.company.cash -= request.budget;
   const job: FixerJob = {
     id: newId(state, 'fx'),
@@ -123,7 +126,7 @@ export function startFixerJob(state: GameState, request: FixerRequest): ActionRe
     report: null,
   };
   state.fixerJobs.push(job);
-  return { ok: true, message: `The fixer takes the job. ${formatZuzu(request.budget)} paid, report in ${q.months} month${q.months > 1 ? 's' : ''}.` };
+  return ok(`The fixer takes the job. ${formatZuzu(request.budget)} paid, report in ${q.months} month${q.months > 1 ? 's' : ''}.`);
 }
 
 type Outcome = 'success' | 'partial' | 'failed';
@@ -135,7 +138,7 @@ function roll(state: GameState, job: FixerJob): Outcome {
   const hits = rollPool(state, dice);
   const need = hitsNeeded(state, job);
   if (hits >= need) return 'success';
-  if (need >= 2 && hits === need - 1) return 'partial';
+  if (hits === need - 1) return 'partial';
   return 'failed';
 }
 
@@ -164,29 +167,26 @@ export function resolveFixerJobs(state: GameState): void {
 function blowback(state: GameState, job: FixerJob): string {
   state.company.boardConfidence = clamp(state.company.boardConfidence - BLOWBACK_BOARD_HIT);
   state.player.reputation = clamp(state.player.reputation - BLOWBACK_REP_HIT);
-  const kind = job.kind === 'dirt' ? 'scandal' : 'leak';
-  let what = 'A fixer job went wrong and the trail leads back to the company.';
+  let what: string;
   if (job.kind === 'dirt' && job.targetPersonId) {
     const t = person(state, job.targetPersonId);
     adjustLoyalty(state, t.id, -10);
-    what = `${fullName(t)} found out someone was digging into ${pronounPoss(t)} life. The trail leads to the executive floor.`;
+    what = `${fullName(t)} found out someone was digging into ${pronoun(t, 'possessive')} life. The trail leads to the executive floor.`;
   } else if (job.kind === 'specialHire') {
     what = 'The rival corp has traced the extraction attempt to us and is telling the press.';
   } else {
     what = 'A shipment was seized and the paperwork names the company.';
   }
-  state.incidents.push({ kind, personIds: [state.player.personId], unitId: job.targetUnitId, data: { source: 'fixer', what } });
+  state.incidents.push({ kind: 'fixerFallout', personIds: [], unitId: job.targetUnitId, what });
   return 'It got out. Not my doing, but it is on you.';
 }
-
-const pronounPoss = (p: { pronouns: string }): string => (p.pronouns === 'she' ? 'her' : p.pronouns === 'he' ? 'his' : 'their');
 
 function materials(state: GameState, job: FixerJob, outcome: Outcome): string {
   const divId = divisionOf(state, job.targetUnitId);
   const name = job.targetUnitId ? unit(state, job.targetUnitId).name : 'the division';
   if (!divId || outcome === 'failed') return `Supplier folded. Nothing for ${name}. Money is gone.`;
   const d = state.divisions[divId];
-  d.market = clamp(d.market + (outcome === 'success' ? MATERIALS_MARKET_BOOST : MATERIALS_MARKET_BOOST / 2), 0.7, 1.4);
+  d.market = clamp(d.market + (outcome === 'success' ? MATERIALS_MARKET_BOOST : MATERIALS_MARKET_BOOST / 2), MARKET_MIN, MARKET_MAX);
   return outcome === 'success'
     ? `Delivered. Crates at ${name}'s dock, paperwork clean. Production will run hot a few months.`
     : `Half the order landed at ${name}. The rest got diverted. Usable.`;
@@ -204,15 +204,7 @@ function specialHire(state: GameState, job: FixerJob, outcome: Outcome): string 
   p.attentionReason = 'Extracted specialist';
   addLifeEvent(state, p.id, 'hired', 'Extracted from a rival corp and brought into the company.', 5, true);
   if (!strong) {
-    const hook: Secret = {
-      id: newId(state, 's'),
-      kind: 'rivalPayroll',
-      description: 'The old employer still has a hook in them.',
-      severity: 2,
-      revealed: false,
-      involvedIds: [],
-    };
-    p.secrets.push(hook);
+    addSecret(state, p.id, { kind: 'rivalPayroll', description: 'The old employer still has a hook in them.', severity: 2 });
     return `${fullName(p)} is in ${target.name}. Good, not the best. Old employer may still have a line to them.`;
   }
   return `${fullName(p)} is in ${target.name}. Walked out clean with a good work history. Top of the field.`;

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { npcTuning, runNpcMonth } from './npc';
 import { smallCompany } from './testkit';
 import { generateGame } from './generate';
-import { adjustOpinion, removeFromCompany, setTag } from './org';
+import { adjustOpinion, opinionOf, removeFromCompany, setTag } from './org';
 import type { GameState } from './types';
 
 const saved = { ...npcTuning };
@@ -80,7 +80,7 @@ describe('managers', () => {
     b.involvement = 0;
     adjustOpinion(f.state, f.head.id, a.id, 60);
     adjustOpinion(f.state, f.head.id, b.id, -20);
-    const before = adjustOpinion(f.state, b.id, f.head.id, 0).opinion;
+    const before = opinionOf(f.state, b.id, f.head.id);
     const sat = b.satisfaction;
     runNpcMonth(f.state);
     expect(f.team.leadId).toBe(a.id);
@@ -97,9 +97,9 @@ describe('managers', () => {
     f.lead.performance = 80;
     runNpcMonth(f.state);
     expect(f.division.leadId).toBeNull();
-    const inc = f.state.incidents.find((i) => i.kind === 'promotionDemand');
+    const inc = f.state.incidents.find((i) => i.kind === 'seatVacancy');
     expect(inc).toBeDefined();
-    expect(inc!.data.vacantUnitId).toBe(f.division.id);
+    expect(inc!.unitId).toBe(f.division.id);
   });
 
   it('rehires to keep a unit near its size', () => {
@@ -134,7 +134,7 @@ describe('leaving', () => {
     w.satisfaction = 0;
     w.performance = 90;
     runNpcMonth(f.state);
-    expect(f.state.incidents.find((i) => i.kind === 'poachOffer')?.data.rivalCorp).toBeTruthy();
+    expect(f.state.incidents.find((i) => i.kind === 'poachOffer')).toBeTruthy();
     expect(w.status).toBe('active');
     f.state.incidents = [];
     f.state.month++;

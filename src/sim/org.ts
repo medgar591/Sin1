@@ -10,13 +10,11 @@ import type {
   PersonStatus,
   Relation,
   RelTag,
-  Role,
+  Secret,
   UnitId,
-  UnitKind,
 } from './types';
-
-export const clamp = (value: number, min = 0, max = 100): number =>
-  Math.max(min, Math.min(max, value));
+import { isSeatTitle, leadTitle, memberTitle, roleForUnitKind } from './roles';
+import { clamp } from './util';
 
 export function newId(state: GameState, prefix: string): string {
   return `${prefix}${state.nextId++}`;
@@ -45,6 +43,15 @@ export function pronoun(p: Person, form: 'subject' | 'object' | 'possessive'): s
   return table[p.pronouns][form];
 }
 
+/** "is" or "are", agreeing with the person's pronoun. */
+export const be = (p: Person): string => (p.pronouns === 'they' ? 'are' : 'is');
+
+/** "has" or "have". */
+export const have = (p: Person): string => (p.pronouns === 'they' ? 'have' : 'has');
+
+/** A regular present-tense verb agreeing with the pronoun: stay, stays; resent, resents. */
+export const verb = (p: Person, base: string): string => (p.pronouns === 'they' ? base : `${base}s`);
+
 export function isActive(p: Person): boolean {
   return p.status === 'active';
 }
@@ -62,14 +69,15 @@ export function playerPerson(state: GameState): Person {
   return person(state, state.player.personId);
 }
 
-export const roleForUnitKind: Record<UnitKind, Role> = {
-  executive: 'ceo',
-  function: 'officer',
-  division: 'divisionHead',
-  subdivision: 'subdivisionHead',
-  team: 'teamLead',
-  subteam: 'subteamLead',
-};
+/** True for board members, by role or by seat on the board. */
+export function isDirector(state: GameState, p: Person): boolean {
+  return p.role === 'chair' || p.role === 'director' || state.directors.some((d) => d.personId === p.id);
+}
+
+/** Directors still serving. */
+export function activeDirectors(state: GameState): Person[] {
+  return state.directors.map((d) => person(state, d.personId)).filter(isActive);
+}
 
 /** True if the person leads the unit they are assigned to. */
 export function isLead(state: GameState, p: Person): boolean {
@@ -102,13 +110,6 @@ export function chainOfCommand(state: GameState, personId: PersonId): PersonId[]
     boss = bossOf(state, boss);
   }
   return chain;
-}
-
-/** People whose immediate boss is this person. */
-export function directReports(state: GameState, personId: PersonId): PersonId[] {
-  return activeStaff(state)
-    .filter((p) => p.id !== personId && bossOf(state, p.id) === personId)
-    .map((p) => p.id);
 }
 
 /** The unit and all units below it. */
@@ -152,23 +153,36 @@ export function opinionOf(state: GameState, from: PersonId, to: PersonId): numbe
   return getRelation(state, from, to)?.opinion ?? 0;
 }
 
-/** Adjusts how `from` feels about `to`, creating the relation if needed. */
-export function adjustOpinion(state: GameState, from: PersonId, to: PersonId, delta: number): Relation {
-  if (from === to) throw new Error('self relation');
+/**
+ * The relation from `from` to `to`, created neutral if it does not exist.
+ * Nobody has a relation with themselves, so a self pair gets a throwaway
+ * neutral relation that is never stored.
+ */
+function ensureRelation(state: GameState, from: PersonId, to: PersonId): Relation {
+  if (from === to) return { opinion: 0, tag: null };
   const row = (state.relations[from] ??= {});
-  const rel = (row[to] ??= { opinion: 0, tag: null });
+  return (row[to] ??= { opinion: 0, tag: null });
+}
+
+/** Adjusts how `from` feels about `to`, creating the relation if needed. Does nothing when `from` is `to`. */
+export function adjustOpinion(state: GameState, from: PersonId, to: PersonId, delta: number): void {
+  const rel = ensureRelation(state, from, to);
   rel.opinion = clamp(rel.opinion + delta, -100, 100);
-  return rel;
 }
 
 export function setTag(state: GameState, from: PersonId, to: PersonId, tag: RelTag | null): void {
-  adjustOpinion(state, from, to, 0).tag = tag;
+  ensureRelation(state, from, to).tag = tag;
 }
 
 /** Changes loyalty to the CEO. */
 export function adjustLoyalty(state: GameState, personId: PersonId, delta: number): void {
   const p = person(state, personId);
   p.loyalty = clamp(p.loyalty + delta);
+}
+
+export function adjustSatisfaction(state: GameState, personId: PersonId, delta: number): void {
+  const p = person(state, personId);
+  p.satisfaction = clamp(p.satisfaction + delta);
 }
 
 export function addLog(
@@ -191,6 +205,24 @@ export function addLifeEvent(
   person(state, personId).history.push({ month: state.month, kind, text, impact, byPlayer });
 }
 
+/** Gives a person a new secret. Severity: 1 embarrassing, 2 career-ending, 3 criminal. */
+export function addSecret(
+  state: GameState,
+  personId: PersonId,
+  secret: Pick<Secret, 'kind' | 'description' | 'severity'> & { involvedIds?: PersonId[] },
+): Secret {
+  const s: Secret = { id: newId(state, 's'), revealed: false, involvedIds: [], ...secret };
+  person(state, personId).secrets.push(s);
+  return s;
+}
+
+/** Reveals the person's hidden secrets of the given kinds and returns them. */
+export function revealSecrets(p: Person, kinds: Secret['kind'][]): Secret[] {
+  const found = p.secrets.filter((s) => kinds.includes(s.kind) && !s.revealed);
+  for (const s of found) s.revealed = true;
+  return found;
+}
+
 /** Takes a person out of whatever seat or unit they hold. Leaves a lead seat empty. */
 export function detachFromUnit(state: GameState, personId: PersonId): void {
   const p = person(state, personId);
@@ -201,31 +233,45 @@ export function detachFromUnit(state: GameState, personId: PersonId): void {
   p.unitId = null;
 }
 
-/** Makes the person a plain member of a unit (removing them from any old seat). */
+/**
+ * Makes the person a plain member of a unit (removing them from any old seat).
+ * A lead moving down, or anyone whose title was just a default seat title of
+ * the unit they left, gets the new unit's member title; job titles stay.
+ */
 export function placeAsMember(state: GameState, personId: PersonId, unitId: UnitId): void {
-  detachFromUnit(state, personId);
   const p = person(state, personId);
+  const from = p.unitId ? state.units[p.unitId] : null;
+  const retitle = !!from && (from.leadId === personId || isSeatTitle(p.title, from));
+  detachFromUnit(state, personId);
   const u = unit(state, unitId);
   u.memberIds.push(personId);
   p.unitId = unitId;
   p.role = 'worker';
+  if (retitle) p.title = memberTitle(u);
 }
 
 /**
- * Seats the person as the unit's lead. The previous lead, if any, is left
- * without a unit; callers decide what happens to them.
+ * Seats the person as the unit's lead and gives them the seat's title. A
+ * sitting lead steps down to a member of the same unit (and is returned so the
+ * caller can apply the consequences).
  */
-export function setLead(state: GameState, unitId: UnitId, personId: PersonId): void {
+export function seatLead(state: GameState, unitId: UnitId, personId: PersonId): Person | null {
   const u = unit(state, unitId);
-  if (u.leadId && u.leadId !== personId) person(state, u.leadId).unitId = null;
+  const displaced = u.leadId && u.leadId !== personId ? person(state, u.leadId) : null;
+  if (displaced) placeAsMember(state, displaced.id, unitId);
   detachFromUnit(state, personId);
   u.leadId = personId;
   const p = person(state, personId);
   p.unitId = unitId;
   p.role = roleForUnitKind[u.kind];
+  p.title = leadTitle(u);
+  return displaced;
 }
 
-/** Removes someone from the company for good. */
+/**
+ * Removes someone from the company for good. Their relationships stay, so
+ * friends and sponsors can still react to their going.
+ */
 export function removeFromCompany(
   state: GameState,
   personId: PersonId,
@@ -238,8 +284,7 @@ export function removeFromCompany(
     // A weak performer being dismissed is not a loss to the team.
     const lead = state.units[before.unitId].leadId === personId;
     if (lead || status !== 'fired') {
-      const churn = (state.unitChurn ??= {});
-      churn[before.unitId] = (churn[before.unitId] ?? 0) + (lead ? 2 : 1);
+      state.unitChurn[before.unitId] = (state.unitChurn[before.unitId] ?? 0) + (lead ? 2 : 1);
     }
   }
   detachFromUnit(state, personId);
@@ -249,11 +294,32 @@ export function removeFromCompany(
   p.fate = fate;
   for (const c of Object.values(state.cliques)) c.memberIds = c.memberIds.filter((id) => id !== personId);
   p.cliqueId = null;
+  delete state.plots[personId];
 }
 
 /** Can the player act on this person without the skip-level penalty? */
 export function hasAttention(state: GameState, p: Person): boolean {
   return p.attentionUntil !== null && state.month <= p.attentionUntil;
+}
+
+/** An investigation of a unit keeps its people's inner workings visible this many months. */
+export const INTEL_MONTHS = 6;
+
+/** The latest recent investigation covering the unit (its own or an ancestor's), if any. */
+export function unitIntelMonth(state: GameState, unitId: UnitId): Month | null {
+  let best: Month | null = null;
+  for (const u of unitAncestry(state, unitId)) {
+    const m = u.investigatedMonth;
+    if (m !== null && state.month - m <= INTEL_MONTHS && (best === null || m > best)) best = m;
+  }
+  return best;
+}
+
+/** Whether feuds, cliques, secrets and relationships of this person are visible to the player. */
+export function hasIntel(state: GameState, personId: PersonId): boolean {
+  const p = person(state, personId);
+  if (p.investigatedMonth !== null) return true;
+  return p.unitId !== null && unitIntelMonth(state, p.unitId) !== null;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

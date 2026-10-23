@@ -2,9 +2,10 @@ import { useState } from 'preact/hooks';
 import type { Person, PersonId, PromiseKind, Skills } from '../sim/types';
 import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead } from '../sim/org';
 import {
-  ATTENTION_COST, demote, fire, fireAttentionCost, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
+  demote, fire, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
   type MeetingApproach, type SkipLevelInfo,
 } from '../sim/actions';
+import { ATTENTION_COST, attentionCost } from '../sim/attention';
 import { Bar, Btn, ConfirmBtn, DivBar, PersonChip, PersonLink, Seg, Sheet, Stepper, intelVisible, levelClass, signed, unitLabel } from './common';
 import { UnitPicker } from './pickers';
 import { closeSheet, game, goOrg, openUnit, run } from './store';
@@ -92,7 +93,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
               <Btn onClick={() => tog('salary')}>Salary</Btn>
               <Btn onClick={() => tog('options')}>Options</Btn>
               <Btn onClick={() => run((s) => investigatePerson(s, id))} cost={ATTENTION_COST.investigatePerson}>Investigate</Btn>
-              <ConfirmBtn label="Fire" cls="danger" cost={fireAttentionCost(game(), id)} onClick={() => run((s) => fire(s, id))} />
+              <ConfirmBtn label="Fire" cls="danger" cost={attentionCost(game(), 'fire', id)} onClick={() => run((s) => fire(s, id))} />
             </div>
 
             <div class="hint">{leads ? 'Leads can be promoted, demoted or fired, not reassigned.' : 'Reassign moves them as a member; Promote makes them a lead.'}</div>

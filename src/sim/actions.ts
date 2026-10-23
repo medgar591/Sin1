@@ -5,7 +5,6 @@ import type {
   ActionResult,
   FunctionKind,
   GameState,
-  LifeEvent,
   OrgUnit,
   Person,
   PersonId,
@@ -14,7 +13,7 @@ import type {
   UnitId,
   UnitKind,
 } from './types';
-import { createPerson, marketSalary } from './generate';
+import { createPerson } from './generate';
 import { endGame } from './epilogue';
 import {
   activeStaff,
@@ -22,45 +21,36 @@ import {
   addLog,
   adjustLoyalty,
   adjustOpinion,
-  chainOfCommand,
+  adjustSatisfaction,
   bossOf,
-  clamp,
+  chainOfCommand,
   formatZuzu,
   fullName,
   hasAttention,
-  isLead,
+  isActive,
   newId,
+  isDirector,
+  isLead,
+  opinionOf,
   peopleUnder,
   person,
   placeAsMember,
   pronoun,
   removeFromCompany,
-  roleForUnitKind,
-  setLead,
+  seatLead,
   unit,
+  unitAncestry,
   unitsUnder,
+  verb,
+  be,
 } from './org';
+import { ALLOWED_PARENTS, marketSalary, roleForUnitKind, roleRank } from './roles';
 import { chance, pick, randInt } from './rng';
-import { setbackPlot } from './npc';
-
-export const ATTENTION_COST = {
-  hire: 1,
-  fire: 1,
-  promote: 1,
-  demote: 1,
-  reassign: 1,
-  setSalary: 0,
-  grantOptions: 0,
-  setBudget: 0,
-  restructure: 1,
-  meet: 1,
-  investigatePerson: 1,
-  investigateUnit: 1,
-  lobbyDirector: 1,
-  fixer: 1,
-  setGuidance: 0,
-  allocateBonus: 0,
-} as const;
+import { setbackPlot } from './plots';
+import { PROMISE_LABEL, PROMISE_MAX_MONTHS, makePromise } from './promises';
+import { attentionCost, trySpend, type AttentionAction } from './attention';
+import { ripple, sponsorsOf } from './ties';
+import { capitalize, clamp, fail, ok, roundTo, sum } from './util';
 
 // ---- Tuning ----
 /** Loyalty lost by the immediate boss when the player goes around them. */
@@ -82,8 +72,6 @@ const HIRE_LOYALTY_BONUS = 10;
 const SEVERANCE_BASE_MONTHS = 2;
 const SEVERANCE_MAX_MONTHS = 12;
 const PROTECTOR_ANGER = 14;
-const TIE_WEIGHT = { lover: 0.6, mentor: 0.7, protege: 0.7, friend: 0.5, clique: 0.3, fan: 0.3 } as const;
-const RIVAL_REACTION = 0.3;
 
 const PROMOTION_RAISE_MIN = 12;
 const PROMOTION_RAISE_MAX = 20;
@@ -91,21 +79,13 @@ const DEMOTION_PAY_CUT = 0.1;
 const PASSED_OVER_AMBITION = 55;
 
 const BONUS_HIGH_PERFORMER = 70;
-const BONUS_WEIGHT = { officer: 3, divisionHead: 2.5, other: 1 } as const;
+const BONUS_WEIGHT = { officer: 3, divisionHead: 2.5, performer: 1 } as const;
 const OPTION_GRANT_MAX_FRACTION = 0.005;
 
 const PROMISE_LOYALTY = 10;
 const PROMISE_OPINION = 6;
-const PROMISE_MAX_MONTHS = 24;
-const RAISE_PROMISE_FRACTION = 0.1;
-const BROKEN_LOYALTY = 20;
-const BROKEN_OPINION = 25;
-const BROKEN_FRIEND_OPINION = 6;
-const KEPT_LOYALTY = 6;
-const KEPT_OPINION = 8;
 
-/** Firing an officer takes the CEO's full attention and the board notices. */
-const OFFICER_FIRE_ATTENTION = 2;
+/** Firing an officer takes the board's notice. */
 const OFFICER_FIRE_CONFIDENCE = 3;
 /** Opinion lost with each director who was close to the fired officer (scaled by how close). */
 const OFFICER_FIRE_ALLY_OPINION = 10;
@@ -119,43 +99,17 @@ const FAVOR_COST = 150_000;
 const FAVOR_SWING = 12;
 const PRESSURE_BACKFIRE = -20;
 
-const ROLE_RANK: Record<Role, number> = {
-  ceo: 9, chair: 8, director: 8, officer: 5, divisionHead: 4,
-  subdivisionHead: 3, teamLead: 2, subteamLead: 1, worker: 0,
-};
-
-const FUNCTION_TITLES: Record<FunctionKind, string> = {
-  operations: 'Chief Operating Officer',
-  finance: 'Chief Financial Officer',
-  security: 'Head of Security',
-  personnel: 'Head of Personnel',
-  legal: 'General Counsel',
-};
-
 // ---- Shared helpers ----
 
-const fail = (message: string): ActionResult => ({ ok: false, message });
-const ok = (message: string): ActionResult => ({ ok: true, message });
-const roundTo = (n: number, step: number) => Math.round(n / step) * step;
-const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-function precheck(state: GameState, cost: number): ActionResult | null {
-  if (state.gameOver) return fail('The game is over.');
-  if (state.player.attentionLeft < cost) return fail('No attention left this month.');
-  return null;
+/** Spends the attention an action costs, or returns why it can't be done. Call after validating, before acting. */
+function spend(state: GameState, action: AttentionAction, targetId?: PersonId): ActionResult | null {
+  return trySpend(state, attentionCost(state, action, targetId));
 }
-
-const spend = (state: GameState, cost: number) => {
-  state.player.attentionLeft -= cost;
-};
-
-const isDirector = (state: GameState, p: Person) =>
-  p.role === 'chair' || p.role === 'director' || state.directors.some((d) => d.personId === p.id);
 
 /** A staff member the player may act on: active, in the tree, not the player, not on the board. */
 function staffTarget(state: GameState, id: PersonId): Person | ActionResult {
   const p = state.people[id];
-  if (!p || p.status !== 'active') return fail('That person is no longer with the company.');
+  if (!p || !isActive(p)) return fail('That person is no longer with the company.');
   if (id === state.player.personId) return fail("You can't do that to yourself.");
   if (isDirector(state, p)) return fail('Directors answer to the board, not to you.');
   if (p.unitId === null) return fail('That person has no post in the company.');
@@ -163,29 +117,12 @@ function staffTarget(state: GameState, id: PersonId): Person | ActionResult {
 }
 const isFail = (x: Person | ActionResult): x is ActionResult => 'ok' in x;
 
-export function seatTitle(u: OrgUnit): string {
-  switch (u.kind) {
-    case 'executive': return 'Chief Executive Officer';
-    case 'function': return (u.functionKind && FUNCTION_TITLES[u.functionKind]) || `Head of ${u.name}`;
-    case 'division':
-    case 'subdivision': return `Head of ${u.name}`;
-    case 'team': return `Team Lead, ${u.name}`;
-    case 'subteam': return `Sub-team Lead, ${u.name}`;
-  }
-}
-const memberTitle = (u: OrgUnit) => `Staff, ${u.name}`;
-
-function teamName(u: OrgUnit): string {
-  return u.name;
-}
-
 /** Leads from this unit (or its parent) up to the root, excluding the player; immediate boss first. */
 function leadsFromUnit(state: GameState, unitId: UnitId, includeOwn: boolean): PersonId[] {
+  const chain = unitAncestry(state, unitId);
   const out: PersonId[] = [];
-  let u: OrgUnit | null = includeOwn ? unit(state, unitId) : unit(state, unitId).parentId ? unit(state, unit(state, unitId).parentId!) : null;
-  while (u) {
+  for (const u of includeOwn ? chain : chain.slice(1)) {
     if (u.leadId && u.leadId !== state.player.personId && !out.includes(u.leadId)) out.push(u.leadId);
-    u = u.parentId ? unit(state, u.parentId) : null;
   }
   return out;
 }
@@ -204,7 +141,7 @@ export interface SkipLevelInfo {
 
 export function skipLevelInfo(state: GameState, targetId: PersonId): SkipLevelInfo {
   const t = person(state, targetId);
-  const bypassed = t.status === 'active' ? chainOfCommand(state, targetId).filter((id) => id !== state.player.personId) : [];
+  const bypassed = isActive(t) ? chainOfCommand(state, targetId).filter((id) => id !== state.player.personId) : [];
   const waived = hasAttention(state, t);
   const penalties = bypassed.map((_, i) => (waived ? 0 : i === 0 ? SKIP_BOSS_PENALTY : SKIP_OTHER_PENALTY));
   return { bypassed, penalty: Math.max(0, ...penalties), penalties, waived };
@@ -228,7 +165,7 @@ function applySkip(state: GameState, groups: PersonId[][], targetId: PersonId | 
   let lastObj = 'them';
   for (const [id, w] of weights) {
     const m = state.people[id];
-    if (!m || m.status !== 'active') continue;
+    if (!m || !isActive(m)) continue;
     adjustLoyalty(state, id, -Math.round(w * strength));
     adjustOpinion(state, id, state.player.personId, -Math.round((w * strength) / 2));
     names.push(m.lastName);
@@ -239,58 +176,14 @@ function applySkip(state: GameState, groups: PersonId[][], targetId: PersonId | 
   return ` ${who} will remember you went around ${names.length === 1 ? lastObj : 'them'}.`;
 }
 
-/** Tie strength between `x` and the target (positive: x cares about them). */
-function tieWeight(state: GameState, x: PersonId, targetId: PersonId): number {
-  const rel = state.relations[x]?.[targetId];
-  const t = person(state, targetId);
-  const mate = t.cliqueId !== null && person(state, x).cliqueId === t.cliqueId;
-  if (rel?.tag === 'lover') return TIE_WEIGHT.lover;
-  if (rel?.tag === 'protege' || rel?.tag === 'mentor') return TIE_WEIGHT.mentor;
-  if (state.relations[targetId]?.[x]?.tag === 'protege' || state.relations[targetId]?.[x]?.tag === 'mentor') return TIE_WEIGHT.mentor;
-  if (rel?.tag === 'friend') return TIE_WEIGHT.friend;
-  if (rel?.tag === 'rival' || rel?.tag === 'grudge') return -RIVAL_REACTION;
-  if (mate) return TIE_WEIGHT.clique;
-  if (rel && rel.opinion >= 50) return TIE_WEIGHT.fan;
-  return 0;
-}
-
-/** Friends, lovers, protégés/mentors and clique-mates of the target react to what happened to them. */
-function ripple(state: GameState, targetId: PersonId, opinionDelta: number, loyaltyDelta = 0): void {
-  const t = person(state, targetId);
-  const candidates = new Set<PersonId>(Object.keys(state.relations).filter((x) => state.relations[x][targetId]));
-  for (const x of Object.keys(state.relations[targetId] ?? {})) candidates.add(x);
-  if (t.cliqueId && state.cliques[t.cliqueId]) for (const x of state.cliques[t.cliqueId].memberIds) candidates.add(x);
-  for (const x of candidates) {
-    const m = state.people[x];
-    if (!m || m.status !== 'active' || x === targetId || x === state.player.personId || isDirector(state, m)) continue;
-    const w = tieWeight(state, x, targetId);
-    if (w === 0) continue;
-    const o = Math.round(opinionDelta * w);
-    const l = Math.round(loyaltyDelta * w);
-    if (o) adjustOpinion(state, x, state.player.personId, o);
-    if (l) adjustLoyalty(state, x, l);
-  }
-}
-
-/** People who sponsor the target: their mentor, or anyone whose protégé they are. */
-function protectorsOf(state: GameState, targetId: PersonId): PersonId[] {
-  const out = new Set<PersonId>();
-  for (const [x, row] of Object.entries(state.relations)) if (row[targetId]?.tag === 'protege') out.add(x);
-  for (const [x, rel] of Object.entries(state.relations[targetId] ?? {})) if (rel.tag === 'mentor') out.add(x);
-  return [...out].filter((x) => {
-    const m = state.people[x];
-    return m && m.status === 'active' && x !== state.player.personId && !isDirector(state, m);
-  });
-}
-
 /** Ambitious members of a unit resent a lead appointed over them. */
 function resentPassedOver(state: GameState, u: OrgUnit, except: PersonId[]): void {
   for (const id of u.memberIds.slice()) {
     const m = state.people[id];
-    if (!m || m.status !== 'active' || except.includes(id) || m.ambition < PASSED_OVER_AMBITION) continue;
+    if (!m || !isActive(m) || except.includes(id) || m.ambition < PASSED_OVER_AMBITION) continue;
     adjustOpinion(state, id, state.player.personId, -(2 + Math.round(m.ambition / 25)));
-    m.satisfaction = clamp(m.satisfaction - 4);
-    addLifeEvent(state, id, 'passedOver', `Passed over for the lead of ${teamName(u)}.`, -2, true);
+    adjustSatisfaction(state, id, -4);
+    addLifeEvent(state, id, 'passedOver', `Passed over for the lead of ${u.name}.`, -2, true);
   }
 }
 
@@ -298,8 +191,6 @@ function resentPassedOver(state: GameState, u: OrgUnit, except: PersonId[]): voi
 
 /** Hires a new person into a unit, as its lead (if the seat is empty) or as a member. */
 export function hire(state: GameState, unitId: UnitId, asLead: boolean, tier: HireTier): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.hire);
-  if (pre) return pre;
   const u = state.units[unitId];
   if (!u) return fail('No such unit.');
   const cfg = HIRE_TIERS[tier];
@@ -311,22 +202,18 @@ export function hire(state: GameState, unitId: UnitId, asLead: boolean, tier: Hi
   const salary = roundTo(marketSalary(role, quality, state.month) * cfg.pay, 500);
   const fee = Math.round(salary * cfg.fee);
   if (fee > state.company.cash) return fail(`The recruiter's fee (${formatZuzu(fee)}) is more than the company has on hand.`);
+  const blocked = spend(state, 'hire');
+  if (blocked) return blocked;
 
   const p = createPerson(state, { role, quality, salary });
   p.salary = salary;
   p.hiredMonth = state.month;
   p.loyalty = clamp(p.loyalty + HIRE_LOYALTY_BONUS);
   const groups = [leadsFromUnit(state, unitId, !asLead)];
-  if (asLead) {
-    setLead(state, unitId, p.id);
-    p.title = seatTitle(u);
-  } else {
-    placeAsMember(state, p.id, unitId);
-    if (!p.title) p.title = memberTitle(u);
-  }
+  if (asLead) seatLead(state, unitId, p.id);
+  else placeAsMember(state, p.id, unitId);
   adjustOpinion(state, p.id, state.player.personId, 10);
   state.company.cash -= fee;
-  spend(state, ATTENTION_COST.hire);
   const skip = applySkip(state, groups, null);
   addLifeEvent(state, p.id, 'hired', `Hired as ${p.title} at ${formatZuzu(salary)} a year.`, 5, true);
   if (asLead) resentPassedOver(state, u, [p.id]);
@@ -334,23 +221,15 @@ export function hire(state: GameState, unitId: UnitId, asLead: boolean, tier: Hi
   return ok(`Hired ${fullName(p)} as ${p.title} at ${formatZuzu(salary)}${fee ? `, plus a ${formatZuzu(fee)} recruiter fee` : ''}.${skip}`);
 }
 
-/** Attention it takes to fire this person: officers cost more than anyone else. */
-export function fireAttentionCost(state: GameState, personId: PersonId): number {
-  return state.people[personId]?.role === 'officer' ? OFFICER_FIRE_ATTENTION : ATTENTION_COST.fire;
-}
-
 export function fire(state: GameState, personId: PersonId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.fire);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
-  const cost = fireAttentionCost(state, personId);
-  const pre2 = precheck(state, cost);
-  if (pre2) return fail(`Firing ${fullName(p)} takes ${cost} attention.`);
+  const blocked = spend(state, 'fire', personId);
+  if (blocked) return blocked;
 
   const groups = [chainOfCommand(state, personId)];
   const skip = applySkip(state, groups, personId);
-  const protectors = protectorsOf(state, personId);
+  const protectors = sponsorsOf(state, personId);
   const months = clamp(Math.round(SEVERANCE_BASE_MONTHS + (state.month - p.hiredMonth) / 12), SEVERANCE_BASE_MONTHS, SEVERANCE_MAX_MONTHS);
   const severance = Math.round((p.salary / 12) * months);
   state.company.cash -= severance;
@@ -363,7 +242,6 @@ export function fire(state: GameState, personId: PersonId): ActionResult {
   const title = p.title;
   addLifeEvent(state, personId, 'fired', `Fired from ${title}, with ${formatZuzu(severance)} severance.`, -8, true);
   removeFromCompany(state, personId, 'fired', `Fired by the CEO from ${title}; left with ${formatZuzu(severance)} severance.`);
-  spend(state, cost);
   addLog(state, `Fired ${fullName(p)} (${title}).`, p.role === 'worker' ? 1 : 2, [personId]);
   let boardNote = '';
   if (p.role === 'officer') {
@@ -373,8 +251,8 @@ export function fire(state: GameState, personId: PersonId): ActionResult {
     state.company.boardConfidence = clamp(state.company.boardConfidence - OFFICER_FIRE_CONFIDENCE * k);
     let upset = 0;
     for (const d of state.directors) {
-      const op = state.relations[d.personId]?.[personId]?.opinion ?? 0;
-      if (op < ALLY_CLOSE || state.people[d.personId]?.status !== 'active') continue;
+      const op = opinionOf(state, d.personId, personId);
+      if (op < ALLY_CLOSE || !isActive(person(state, d.personId))) continue;
       adjustOpinion(state, d.personId, state.player.personId, -Math.round((OFFICER_FIRE_ALLY_OPINION * k * op) / 50));
       upset++;
     }
@@ -388,82 +266,68 @@ export function fire(state: GameState, personId: PersonId): ActionResult {
 
 /** Makes the person lead of the unit. A sitting lead is moved down to a member of it. */
 export function promote(state: GameState, personId: PersonId, unitId: UnitId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.promote);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
   const u = state.units[unitId];
   if (!u) return fail('No such unit.');
   if (u.kind === 'executive') return fail('That seat is yours.');
   if (u.leadId === personId) return fail(`${fullName(p)} already leads ${u.name}.`);
-  const newRole = roleForUnitKind[u.kind];
-  if (ROLE_RANK[newRole] <= ROLE_RANK[p.role]) return fail(`That would not be a promotion for ${fullName(p)}.`);
-  // Promoting someone into a unit above their own seat would leave them reporting to nobody sensible.
-  if (p.unitId && p.unitId !== unitId && isLead(state, p) && unitsUnder(state, unitId).some((x) => x.id === p.unitId) && ROLE_RANK[newRole] <= ROLE_RANK[p.role]) {
-    return fail('That promotion would create a loop in the chain of command.');
-  }
+  if (roleRank[roleForUnitKind[u.kind]] <= roleRank[p.role]) return fail(`That would not be a promotion for ${fullName(p)}.`);
+  const blocked = spend(state, 'promote');
+  if (blocked) return blocked;
 
   const groups = [chainOfCommand(state, personId), leadsFromUnit(state, unitId, false)];
   const skip = applySkip(state, groups, personId);
-  const displaced = u.leadId ? person(state, u.leadId) : null;
   const wasLeadOf = isLead(state, p) ? unit(state, p.unitId!) : null;
 
-  setLead(state, unitId, personId);
-  p.title = seatTitle(u);
+  const displaced = seatLead(state, unitId, personId);
   const pct = randInt(state, PROMOTION_RAISE_MIN, PROMOTION_RAISE_MAX) / 100;
   p.salary = roundTo(p.salary * (1 + pct), 500);
-  p.satisfaction = clamp(p.satisfaction + 10);
+  adjustSatisfaction(state, personId, 10);
   adjustLoyalty(state, personId, 8);
   adjustOpinion(state, personId, state.player.personId, 10);
-  addLifeEvent(state, personId, 'promoted', `Promoted to lead ${teamName(u)}; salary rose to ${formatZuzu(p.salary)}.`, 6, true);
+  addLifeEvent(state, personId, 'promoted', `Promoted to lead ${u.name}; salary rose to ${formatZuzu(p.salary)}.`, 6, true);
 
   let note = '';
   if (displaced) {
-    placeAsMember(state, displaced.id, unitId);
-    displaced.title = memberTitle(u);
-    displaced.satisfaction = clamp(displaced.satisfaction - 15);
+    adjustSatisfaction(state, displaced.id, -15);
     adjustLoyalty(state, displaced.id, -10);
     adjustOpinion(state, displaced.id, state.player.personId, -15);
-    addLifeEvent(state, displaced.id, 'demoted', `Replaced as lead of ${teamName(u)} by ${fullName(p)} and kept on as staff.`, -5, true);
+    addLifeEvent(state, displaced.id, 'demoted', `Replaced as lead of ${u.name} by ${fullName(p)} and kept on as staff.`, -5, true);
     ripple(state, displaced.id, -4, -2);
     note = ` ${displaced.lastName} stays on as staff and will resent it.`;
   }
   resentPassedOver(state, u, [personId, displaced?.id ?? '']);
   ripple(state, personId, 3);
   if (wasLeadOf) addLog(state, `${fullName(p)} left the lead of ${wasLeadOf.name} for ${u.name}; the seat is empty.`, 1, [personId]);
-  spend(state, ATTENTION_COST.promote);
   addLog(state, `Promoted ${fullName(p)} to ${p.title}.`, 2, [personId]);
   return ok(`Promoted ${fullName(p)} to ${p.title}, salary ${formatZuzu(p.salary)}.${note}${skip}`);
 }
 
 /** Removes a lead from their seat, leaving them as a member of the same unit. */
 export function demote(state: GameState, personId: PersonId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.demote);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
   if (!isLead(state, p)) return fail(`${fullName(p)} does not lead anything to be demoted from.`);
+  const blocked = spend(state, 'demote');
+  if (blocked) return blocked;
 
   const u = unit(state, p.unitId!);
   const skip = applySkip(state, [chainOfCommand(state, personId)], personId);
   const oldTitle = p.title;
   placeAsMember(state, personId, u.id);
-  p.title = memberTitle(u);
   p.salary = roundTo(p.salary * (1 - DEMOTION_PAY_CUT), 500);
-  p.satisfaction = clamp(p.satisfaction - 20);
+  adjustSatisfaction(state, personId, -20);
   adjustLoyalty(state, personId, -15);
   adjustOpinion(state, personId, state.player.personId, -20);
   addLifeEvent(state, personId, 'demoted', `Demoted from ${oldTitle} to staff, with a pay cut.`, -5, true);
   ripple(state, personId, -4, -2);
-  spend(state, ATTENTION_COST.demote);
   addLog(state, `Demoted ${fullName(p)} from ${oldTitle}.`, 2, [personId]);
   return ok(`Demoted ${fullName(p)} from ${oldTitle}. The seat is open.${skip}`);
 }
 
 /** Moves a non-lead person into another unit as a member. */
 export function reassign(state: GameState, personId: PersonId, unitId: UnitId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.reassign);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
   const dest = state.units[unitId];
@@ -471,16 +335,15 @@ export function reassign(state: GameState, personId: PersonId, unitId: UnitId): 
   if (isLead(state, p)) return fail(`${fullName(p)} leads a unit; demote or promote instead.`);
   if (dest.kind === 'executive') return fail('Not into your own office.');
   if (p.unitId === unitId) return fail(`${fullName(p)} is already in ${dest.name}.`);
+  const blocked = spend(state, 'reassign');
+  if (blocked) return blocked;
 
   const from = unit(state, p.unitId!);
   const skip = applySkip(state, [chainOfCommand(state, personId), leadsFromUnit(state, unitId, true)], personId);
-  const wasSeatTitle = p.title === memberTitle(from);
   placeAsMember(state, personId, unitId);
-  if (wasSeatTitle) p.title = memberTitle(dest);
   const better = dest.morale >= from.morale;
-  p.satisfaction = clamp(p.satisfaction + (better ? 2 : -3));
+  adjustSatisfaction(state, personId, better ? 2 : -3);
   addLifeEvent(state, personId, 'reassigned', `Moved from ${from.name} to ${dest.name}.`, better ? 1 : -1, true);
-  spend(state, ATTENTION_COST.reassign);
   addLog(state, `Moved ${fullName(p)} from ${from.name} to ${dest.name}.`, 1, [personId]);
   return ok(`Moved ${fullName(p)} to ${dest.name}.${skip}`);
 }
@@ -495,10 +358,10 @@ function grumbling(state: GameState, p: Person, headline: number): number {
   let n = 0;
   for (const id of peers) {
     const peer = state.people[id];
-    if (!peer || peer.status !== 'active' || peer.role !== p.role) continue;
+    if (!peer || !isActive(peer) || peer.role !== p.role) continue;
     if (!(p.traits.includes('gossip') || peer.traits.includes('gossip'))) continue;
     if (peer.salary >= headline) continue;
-    peer.satisfaction = clamp(peer.satisfaction - 3);
+    adjustSatisfaction(state, id, -3);
     adjustOpinion(state, id, state.player.personId, -2);
     n++;
   }
@@ -508,13 +371,13 @@ function grumbling(state: GameState, p: Person, headline: number): number {
 const greedFactor = (p: Person) => 0.5 + p.greed / 100;
 
 export function setSalary(state: GameState, personId: PersonId, salary: number): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.setSalary);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
   if (!Number.isFinite(salary) || salary <= 0) return fail('Salary must be a positive amount.');
   salary = Math.round(salary);
   if (salary === p.salary) return fail(`${fullName(p)} already earns that.`);
+  const blocked = spend(state, 'setSalary');
+  if (blocked) return blocked;
 
   const skip = applySkip(state, [chainOfCommand(state, personId)], personId);
   const old = p.salary;
@@ -522,7 +385,7 @@ export function setSalary(state: GameState, personId: PersonId, salary: number):
   const g = greedFactor(p);
   const sharpness = pct < 0 ? 1.5 : 1;
   p.salary = salary;
-  p.satisfaction = clamp(p.satisfaction + clamp(pct * 100 * 0.8 * g * sharpness, -30, 30));
+  adjustSatisfaction(state, personId, clamp(pct * 100 * 0.8 * g * sharpness, -30, 30));
   adjustLoyalty(state, personId, Math.round(clamp(pct * 100 * 0.4 * g * sharpness, -15, 15)));
   adjustOpinion(state, personId, state.player.personId, Math.round(clamp(pct * 100 * 0.5 * g * sharpness, -20, 20)));
   if (pct > 0) {
@@ -536,21 +399,21 @@ export function setSalary(state: GameState, personId: PersonId, salary: number):
 }
 
 export function grantOptions(state: GameState, personId: PersonId, shares: number): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.grantOptions);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
   if (!Number.isFinite(shares) || shares <= 0) return fail('Grant a positive number of shares.');
   shares = Math.floor(shares);
   if (shares < 1) return fail('Grant at least one share.');
   if (shares > state.company.sharesOutstanding * OPTION_GRANT_MAX_FRACTION) return fail('The board would never approve a grant that large.');
+  const blocked = spend(state, 'grantOptions');
+  if (blocked) return blocked;
 
   const skip = applySkip(state, [chainOfCommand(state, personId)], personId);
   const value = shares * state.company.sharePrice;
   const ratio = value / Math.max(1, p.salary);
   const g = greedFactor(p);
   p.stockOptions += shares;
-  p.satisfaction = clamp(p.satisfaction + clamp(ratio * 25 * g, 0, 25));
+  adjustSatisfaction(state, personId, clamp(ratio * 25 * g, 0, 25));
   adjustLoyalty(state, personId, Math.round(clamp(ratio * 12 * g, 0, 15)));
   adjustOpinion(state, personId, state.player.personId, Math.round(clamp(ratio * 10 * g, 0, 15)));
   addLifeEvent(state, personId, 'options', `Granted ${shares.toLocaleString('en-US')} stock options worth ${formatZuzu(value)}.`, clamp(Math.round(ratio * 6), 1, 4), true);
@@ -561,19 +424,19 @@ export function grantOptions(state: GameState, personId: PersonId, shares: numbe
 
 /** Splits the quarter's bonus pool. Amounts in zuzu; unallocated money returns to cash. */
 export function allocateBonus(state: GameState, allocations: Record<string, number>): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.allocateBonus);
-  if (pre) return pre;
   const pool = state.company.bonusPool;
   if (!(pool > 0)) return fail('There is no bonus pool to split.');
   let total = 0;
   for (const [id, amount] of Object.entries(allocations)) {
     const p = state.people[id];
-    if (!p || p.status !== 'active' || p.unitId === null) return fail('A bonus was assigned to someone who is not on staff.');
+    if (!p || !isActive(p) || p.unitId === null) return fail('A bonus was assigned to someone who is not on staff.');
     if (id === state.player.personId) return fail('You cannot pay yourself from the pool.');
     if (!Number.isFinite(amount) || amount < 0) return fail('Bonus amounts must be zero or more.');
     total += amount;
   }
   if (total > pool + 0.5) return fail(`That is ${formatZuzu(total - pool)} more than the pool holds.`);
+  const blocked = spend(state, 'allocateBonus');
+  if (blocked) return blocked;
 
   // Who expects a share, and roughly how big.
   const weights = new Map<PersonId, number>();
@@ -581,9 +444,9 @@ export function allocateBonus(state: GameState, allocations: Record<string, numb
     if (p.id === state.player.personId) continue;
     if (p.role === 'officer') weights.set(p.id, BONUS_WEIGHT.officer);
     else if (p.role === 'divisionHead') weights.set(p.id, BONUS_WEIGHT.divisionHead);
-    else if (p.performance >= BONUS_HIGH_PERFORMER) weights.set(p.id, BONUS_WEIGHT.other);
+    else if (p.performance >= BONUS_HIGH_PERFORMER) weights.set(p.id, BONUS_WEIGHT.performer);
   }
-  const weightSum = [...weights.values()].reduce((a, b) => a + b, 0);
+  const weightSum = sum([...weights.values()]);
   let snubbed = 0;
   for (const [id, w] of weights) {
     const p = person(state, id);
@@ -591,11 +454,11 @@ export function allocateBonus(state: GameState, allocations: Record<string, numb
     const got = allocations[id] ?? 0;
     const ratio = got / fair;
     if (ratio >= 1) {
-      p.satisfaction = clamp(p.satisfaction + 3);
+      adjustSatisfaction(state, id, 3);
       adjustLoyalty(state, id, 1);
     } else if (ratio < 0.5) {
       const sting = (1 - ratio) * greedFactor(p);
-      p.satisfaction = clamp(p.satisfaction - Math.round(6 * sting));
+      adjustSatisfaction(state, id, -Math.round(6 * sting));
       adjustLoyalty(state, id, -Math.round(4 * sting));
       adjustOpinion(state, id, state.player.personId, -Math.round(6 * sting));
       if (ratio < 0.25) {
@@ -608,7 +471,7 @@ export function allocateBonus(state: GameState, allocations: Record<string, numb
     if (amount <= 0) continue;
     const p = person(state, id);
     const frac = amount / Math.max(1, p.salary);
-    p.satisfaction = clamp(p.satisfaction + clamp(frac * 40 * greedFactor(p), 1, 10));
+    adjustSatisfaction(state, id, clamp(frac * 40 * greedFactor(p), 1, 10));
     adjustOpinion(state, id, state.player.personId, Math.round(clamp(frac * 20, 1, 8)));
     addLifeEvent(state, id, 'bonus', `Awarded a ${formatZuzu(amount)} bonus.`, clamp(Math.round(frac * 10), 1, 3), true);
   }
@@ -620,17 +483,17 @@ export function allocateBonus(state: GameState, allocations: Record<string, numb
 }
 
 export function setBudget(state: GameState, unitId: UnitId, budget: number): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.setBudget);
-  if (pre) return pre;
   const u = state.units[unitId];
   if (!u) return fail('No such unit.');
   if (!Number.isFinite(budget) || budget < 0) return fail('A budget cannot be negative.');
   budget = Math.round(budget);
   const old = u.budget;
   if (budget === old) return fail('That is already the budget.');
+  const blocked = spend(state, 'setBudget');
+  if (blocked) return blocked;
   u.budget = budget;
   const lead = u.leadId && u.leadId !== state.player.personId ? state.people[u.leadId] : null;
-  if (lead && lead.status === 'active') {
+  if (lead && isActive(lead)) {
     const change = old > 0 ? (budget - old) / old : 0.3;
     const swing = Math.round(clamp(change * 40, -15, 15));
     adjustOpinion(state, lead.id, state.player.personId, swing);
@@ -641,15 +504,6 @@ export function setBudget(state: GameState, unitId: UnitId, budget: number): Act
 }
 
 // ---- Restructuring ----
-
-const ALLOWED_PARENTS: Record<UnitKind, UnitKind[]> = {
-  executive: [],
-  function: ['executive'],
-  division: ['executive', 'function'],
-  subdivision: ['division', 'subdivision'],
-  team: ['division', 'subdivision', 'function'],
-  subteam: ['team', 'subteam'],
-};
 
 function divisionFor(parent: OrgUnit): UnitId | null {
   return parent.kind === 'division' ? parent.id : parent.divisionId;
@@ -663,7 +517,7 @@ function restamp(state: GameState, rootId: UnitId, div: UnitId | null): void {
 function lowerBy(state: GameState, leadId: PersonId | null, opinion: number, loyalty: number): void {
   if (!leadId || leadId === state.player.personId) return;
   const m = state.people[leadId];
-  if (!m || m.status !== 'active') return;
+  if (!m || !isActive(m)) return;
   adjustOpinion(state, leadId, state.player.personId, opinion);
   adjustLoyalty(state, leadId, loyalty);
 }
@@ -675,8 +529,6 @@ function depthOf(state: GameState, id: UnitId): number {
 }
 
 export function moveUnit(state: GameState, unitId: UnitId, newParentId: UnitId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.restructure);
-  if (pre) return pre;
   const u = state.units[unitId];
   const parent = state.units[newParentId];
   if (!u || !parent) return fail('No such unit.');
@@ -684,6 +536,8 @@ export function moveUnit(state: GameState, unitId: UnitId, newParentId: UnitId):
   if (u.parentId === newParentId) return fail(`${u.name} already reports there.`);
   if (unitsUnder(state, unitId).some((x) => x.id === newParentId)) return fail('A unit cannot move under itself.');
   if (!ALLOWED_PARENTS[u.kind].includes(parent.kind)) return fail(`A ${u.kind} cannot sit under a ${parent.kind}.`);
+  const blocked = spend(state, 'restructure');
+  if (blocked) return blocked;
 
   const oldParent = unit(state, u.parentId);
   const before = depthOf(state, unitId);
@@ -701,15 +555,12 @@ export function moveUnit(state: GameState, unitId: UnitId, newParentId: UnitId):
   }
   lowerBy(state, oldParent.leadId, -4, -1); // losing a unit stings
   lowerBy(state, parent.leadId, 3, 0);
-  spend(state, ATTENTION_COST.restructure);
   addLog(state, `Moved ${u.name} from ${oldParent.name} to ${parent.name}.`, 2, lead ? [lead.id] : []);
   return ok(`${u.name} now reports into ${parent.name}.`);
 }
 
 /** Folds `absorbId` into `keepId`: members and child units move over, its lead becomes a member. */
 export function mergeUnits(state: GameState, keepId: UnitId, absorbId: UnitId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.restructure);
-  if (pre) return pre;
   const keep = state.units[keepId];
   const absorb = state.units[absorbId];
   if (!keep || !absorb) return fail('No such unit.');
@@ -722,23 +573,19 @@ export function mergeUnits(state: GameState, keepId: UnitId, absorbId: UnitId): 
   for (const c of absorb.childIds) {
     if (!ALLOWED_PARENTS[unit(state, c).kind].includes(keep.kind)) return fail(`${absorb.name}'s sub-units can't sit under a ${keep.kind}.`);
   }
+  const blocked = spend(state, 'restructure');
+  if (blocked) return blocked;
 
   const lead = absorb.leadId && absorb.leadId !== state.player.personId ? person(state, absorb.leadId) : null;
   const members = absorb.memberIds.slice();
   const keepLead = keep.leadId;
   if (lead) {
     placeAsMember(state, lead.id, keepId);
-    lead.title = memberTitle(keep);
-    lead.satisfaction = clamp(lead.satisfaction - 15);
+    adjustSatisfaction(state, lead.id, -15);
     lowerBy(state, lead.id, -15, -10);
     addLifeEvent(state, lead.id, 'unitMerged', `Lost the lead of ${absorb.name} when it was merged into ${keep.name}.`, -4, true);
   }
-  for (const id of members) {
-    const m = person(state, id);
-    const seat = m.title === memberTitle(absorb);
-    placeAsMember(state, id, keepId);
-    if (seat) m.title = memberTitle(keep);
-  }
+  for (const id of members) placeAsMember(state, id, keepId);
   for (const c of absorb.childIds.slice()) {
     unit(state, c).parentId = keepId;
     keep.childIds.push(c);
@@ -751,7 +598,6 @@ export function mergeUnits(state: GameState, keepId: UnitId, absorbId: UnitId): 
   keep.morale = clamp(Math.round((keep.morale + absorb.morale) / 2) - 5);
   delete state.units[absorbId];
   lowerBy(state, keepLead, 3, 0);
-  spend(state, ATTENTION_COST.restructure);
   addLog(state, `Merged ${absorb.name} into ${keep.name}.`, 2, lead ? [lead.id] : []);
   return ok(`${absorb.name} is now part of ${keep.name}.${lead ? ` ${lead.lastName} lost ${pronoun(lead, 'possessive')} seat.` : ''}`);
 }
@@ -764,8 +610,6 @@ export function createUnit(
   name: string,
   functionKind?: FunctionKind,
 ): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.restructure);
-  if (pre) return pre;
   const parent = state.units[parentId];
   if (!parent) return fail('No such unit.');
   name = (name ?? '').trim();
@@ -777,6 +621,8 @@ export function createUnit(
     if (!functionKind) return fail('A corporate function needs a kind.');
     if (Object.values(state.units).some((x) => x.functionKind === functionKind)) return fail('That function already exists.');
   }
+  const blocked = spend(state, 'restructure');
+  if (blocked) return blocked;
   const id = newId(state, 'u');
   const u: OrgUnit = {
     id, name, kind, parentId, childIds: [], leadId: null, memberIds: [],
@@ -787,15 +633,12 @@ export function createUnit(
   };
   state.units[id] = u;
   parent.childIds.push(id);
-  spend(state, ATTENTION_COST.restructure);
   addLog(state, `Created ${name} under ${parent.name}.`, 1);
   return ok(`Created ${name} under ${parent.name}. It has no lead yet.`);
 }
 
 /** Removes a unit; its people and child units move up to its parent. */
 export function dissolveUnit(state: GameState, unitId: UnitId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.restructure);
-  if (pre) return pre;
   const u = state.units[unitId];
   if (!u) return fail('No such unit.');
   if (u.parentId === null || u.kind === 'executive') return fail("The CEO's office can't be dissolved.");
@@ -804,21 +647,17 @@ export function dissolveUnit(state: GameState, unitId: UnitId): ActionResult {
   for (const c of u.childIds) {
     if (!ALLOWED_PARENTS[unit(state, c).kind].includes(parent.kind)) return fail(`${u.name}'s sub-units can't sit under ${parent.name}.`);
   }
+  const blocked = spend(state, 'restructure');
+  if (blocked) return blocked;
 
   const lead = u.leadId && u.leadId !== state.player.personId ? person(state, u.leadId) : null;
   if (lead) {
     placeAsMember(state, lead.id, parent.id);
-    lead.title = memberTitle(parent);
-    lead.satisfaction = clamp(lead.satisfaction - 15);
+    adjustSatisfaction(state, lead.id, -15);
     lowerBy(state, lead.id, -15, -10);
     addLifeEvent(state, lead.id, 'unitDissolved', `Lost the lead of ${u.name} when it was dissolved.`, -4, true);
   }
-  for (const id of u.memberIds.slice()) {
-    const m = person(state, id);
-    const seat = m.title === memberTitle(u);
-    placeAsMember(state, id, parent.id);
-    if (seat) m.title = memberTitle(parent);
-  }
+  for (const id of u.memberIds.slice()) placeAsMember(state, id, parent.id);
   for (const c of u.childIds.slice()) {
     unit(state, c).parentId = parent.id;
     parent.childIds.push(c);
@@ -827,7 +666,6 @@ export function dissolveUnit(state: GameState, unitId: UnitId): ActionResult {
   parent.budget += u.budget;
   delete state.units[unitId];
   lowerBy(state, parent.leadId, -2, 0);
-  spend(state, ATTENTION_COST.restructure);
   addLog(state, `Dissolved ${u.name}.`, 2, lead ? [lead.id] : []);
   return ok(`Dissolved ${u.name}; its people now sit in ${parent.name}.`);
 }
@@ -861,24 +699,7 @@ function rapportMod(p: Person): number {
   return m;
 }
 
-const PROMISE_LABEL: Record<PromiseKind, string> = {
-  promotion: 'a promotion',
-  raise: 'a raise',
-  protection: 'protection',
-  budget: 'more budget',
-};
-
-
-function baselineFor(p: Person, state: GameState, kind: PromiseKind): number | null {
-  if (kind === 'raise') return p.salary;
-  if (kind === 'promotion') return ROLE_RANK[p.role];
-  if (kind === 'budget') return p.unitId ? unit(state, p.unitId).budget : null;
-  return null;
-}
-
 export function meet(state: GameState, personId: PersonId, approach: MeetingApproach, promise?: MeetingPromise): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.meet);
-  if (pre) return pre;
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
   const me = person(state, state.player.personId);
@@ -895,31 +716,27 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
     }
   }
 
+  const blocked = spend(state, 'meet');
+  if (blocked) return blocked;
   const skip = applySkip(state, [chainOfCommand(state, personId)], personId, SKIP_MEETING_STRENGTH);
-  spend(state, ATTENTION_COST.meet);
 
   if (approach === 'rapport') {
     const mod = rapportMod(p);
     const o = Math.max(1, Math.round(6 * charm * mod));
     adjustOpinion(state, personId, me.id, o);
     adjustLoyalty(state, personId, Math.max(0, Math.round(4 * charm * mod)));
-    p.satisfaction = clamp(p.satisfaction + 2);
-    return ok(`You spent an hour with ${name}. ${cap(pronoun(p, 'subject'))} left ${o >= 6 ? 'warmer toward you' : 'a little less guarded'}.${skip}`);
+    adjustSatisfaction(state, personId, 2);
+    return ok(`You spent an hour with ${name}. ${capitalize(pronoun(p, 'subject'))} left ${o >= 6 ? 'warmer toward you' : 'a little less guarded'}.${skip}`);
   }
 
   if (approach === 'promise') {
-    const pr = promise!;
-    const id = newId(state, 'pr');
-    const base = baselineFor(p, state, pr.kind);
-    state.promises.push({
-      id, personId, kind: pr.kind, madeMonth: state.month, dueMonth: state.month + pr.months, detail: pr.detail.trim(), state: 'open',
-      ...(base !== null ? { baseline: base } : {}),
-    });
+    const pr = makePromise(state, personId, promise!.kind, promise!.months, promise!.detail);
+    const months = promise!.months;
     adjustLoyalty(state, personId, PROMISE_LOYALTY);
     adjustOpinion(state, personId, me.id, PROMISE_OPINION);
-    addLifeEvent(state, personId, 'promised', `The CEO promised ${pronoun(p, 'object')} ${PROMISE_LABEL[pr.kind]}: ${pr.detail.trim()}`, 1, true);
-    addLog(state, `Promised ${name} ${PROMISE_LABEL[pr.kind]} within ${pr.months} months.`, 1, [personId]);
-    return ok(`${name} took you at your word. It is due in ${pr.months} month${pr.months === 1 ? '' : 's'}.${skip}`);
+    addLifeEvent(state, personId, 'promised', `The CEO promised ${pronoun(p, 'object')} ${PROMISE_LABEL[pr.kind]}: ${pr.detail}`, 1, true);
+    addLog(state, `Promised ${name} ${PROMISE_LABEL[pr.kind]} within ${months} months.`, 1, [personId]);
+    return ok(`${name} took you at your word. It is due in ${months} month${months === 1 ? '' : 's'}.${skip}`);
   }
 
   if (approach === 'threaten') {
@@ -935,14 +752,14 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
     if ((p.traits.includes('ruthless') || p.traits.includes('vain')) && chance(state, 0.5)) {
       adjustOpinion(state, personId, me.id, -10);
       adjustLoyalty(state, personId, -8);
-      state.incidents.push({ kind: 'scheme', personIds: [personId, me.id], unitId: p.unitId, data: { against: me.id, reason: 'threatened' } });
-      extra = ` ${cap(pronoun(p, 'subject'))} did not take it quietly.`;
+      state.incidents.push({ kind: 'scheme', personIds: [personId, me.id], unitId: p.unitId });
+      extra = ` ${capitalize(pronoun(p, 'subject'))} did not take it quietly.`;
     } else if (p.traits.includes('principled') && chance(state, 0.5) && state.directors.length) {
       const d = pick(state, state.directors);
       adjustOpinion(state, d.personId, me.id, -8);
       state.company.boardConfidence = clamp(state.company.boardConfidence - 3);
-      state.incidents.push({ kind: 'complaint', personIds: [personId, bossOf(state, personId) ?? me.id], unitId: p.unitId, data: { about: me.id, director: d.personId, reason: 'threatened' } });
-      extra = ` ${cap(pronoun(p, 'subject'))} took it to the board.`;
+      state.incidents.push({ kind: 'complaint', personIds: [personId, bossOf(state, personId) ?? me.id], unitId: p.unitId });
+      extra = ` ${capitalize(pronoun(p, 'subject'))} took it to the board.`;
     }
     addLog(state, `Threatened ${name}.`, 1, [personId]);
     return ok(`${name} will keep ${pronoun(p, 'possessive')} head down for now.${loyaltyNote}${extra}${skip}`);
@@ -953,11 +770,11 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
   const learned: string[] = [];
   if (chance(state, odds)) {
     p.investigatedMonth = state.month;
-    learned.push('who ' + pronoun(p, 'subject') + (p.pronouns === 'they' ? ' trust' : ' trusts') + ' and who ' + pronoun(p, 'subject') + (p.pronouns === 'they' ? ' resent' : ' resents'));
+    learned.push(`who ${pronoun(p, 'subject')} ${verb(p, 'trust')} and who ${pronoun(p, 'subject')} ${verb(p, 'resent')}`);
     const c = p.cliqueId ? state.cliques[p.cliqueId] : null;
     if (c) {
       c.known = true;
-      learned.push(`that ${pronoun(p, 'subject')} ${p.pronouns === 'they' ? 'run' : 'runs'} with ${c.name}`);
+      learned.push(`that ${pronoun(p, 'subject')} ${verb(p, 'run')} with ${c.name}`);
     }
     const hidden = p.secrets.find((s) => !s.revealed);
     if (hidden && chance(state, odds * 0.6)) {
@@ -978,7 +795,7 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
 function securityHead(state: GameState): Person | null {
   const u = Object.values(state.units).find((x) => x.functionKind === 'security');
   const lead = u?.leadId ? state.people[u.leadId] : null;
-  return lead && lead.status === 'active' ? lead : null;
+  return lead && isActive(lead) ? lead : null;
 }
 
 const effort = (head: Person) => (head.skills.work * 0.6 + head.skills.guile * 0.4) / 100;
@@ -998,16 +815,15 @@ function noticed(state: GameState, target: Person, base: number): boolean {
 
 /** Security digs into a person: reveals some of their secrets and relationships. */
 export function investigatePerson(state: GameState, personId: PersonId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.investigatePerson);
-  if (pre) return pre;
   const p = state.people[personId];
-  if (!p || p.status !== 'active') return fail('That person is no longer with the company.');
+  if (!p || !isActive(p)) return fail('That person is no longer with the company.');
   if (personId === state.player.personId) return fail("You can't investigate yourself.");
   const head = securityHead(state);
   if (!head) return fail('There is no Head of Security to run it.');
   if (head.id === personId) return fail('Security cannot investigate its own head.');
 
-  spend(state, ATTENTION_COST.investigatePerson);
+  const blocked = spend(state, 'investigatePerson');
+  if (blocked) return blocked;
   p.investigatedMonth = state.month;
   const found = p.secrets.filter((s) => !s.revealed && chance(state, findChance(head, p, s.severity)));
   for (const s of found) s.revealed = true;
@@ -1023,20 +839,19 @@ export function investigatePerson(state: GameState, personId: PersonId): ActionR
   const body = found.length
     ? `${found.length === 1 ? 'a secret' : `${found.length} secrets`}: ${found.map((s) => s.description).join('; ')}`
     : 'nothing damaging';
-  return ok(`${head.lastName}'s team found ${body} on ${fullName(p)}.${saw ? ` ${cap(pronoun(p, 'subject'))} noticed.` : ''}`);
+  return ok(`${head.lastName}'s team found ${body} on ${fullName(p)}.${saw ? ` ${capitalize(pronoun(p, 'subject'))} noticed.` : ''}`);
 }
 
 /** Security digs into a unit: reveals feuds, cliques and who really does the work there. */
 export function investigateUnit(state: GameState, unitId: UnitId): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.investigateUnit);
-  if (pre) return pre;
   const u = state.units[unitId];
   if (!u) return fail('No such unit.');
   const head = securityHead(state);
   if (!head) return fail('There is no Head of Security to run it.');
 
-  spend(state, ATTENTION_COST.investigateUnit);
-  const ids = peopleUnder(state, unitId).filter((id) => id !== state.player.personId && state.people[id]?.status === 'active');
+  const blocked = spend(state, 'investigateUnit');
+  if (blocked) return blocked;
+  const ids = peopleUnder(state, unitId).filter((id) => id !== state.player.personId && isActive(person(state, id)));
   const inUnit = new Set(ids);
   for (const x of unitsUnder(state, unitId)) x.investigatedMonth = state.month;
   let secrets = 0;
@@ -1074,20 +889,20 @@ function recentPerformance(state: GameState): number {
 }
 
 export function lobbyDirector(state: GameState, directorId: PersonId, approach: LobbyApproach): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.lobbyDirector);
-  if (pre) return pre;
   const d = state.people[directorId];
-  if (!d || d.status !== 'active' || !state.directors.some((x) => x.personId === directorId)) return fail('That person is not on the board.');
+  if (!d || !isActive(d) || !state.directors.some((x) => x.personId === directorId)) return fail('That person is not on the board.');
   const me = state.player.personId;
   const name = fullName(d);
+  if (approach === 'favor' && state.player.personalCash < FAVOR_COST) return fail(`A favor costs ${formatZuzu(FAVOR_COST)}; you don't have it.`);
+  const blocked = spend(state, 'lobbyDirector');
+  if (blocked) return blocked;
   let delta = 0;
   let message: string;
 
   if (approach === 'persuade') {
     delta = Math.max(1, Math.round(5 * recentPerformance(state) * Math.min(1.3, charmOf(state)) + (d.traits.includes('vain') ? 1 : 0)));
-    message = `You walked ${name} through the numbers. ${cap(pronoun(d, 'subject'))} ${d.pronouns === 'they' ? 'are' : 'is'} more receptive.`;
+    message = `You walked ${name} through the numbers. ${capitalize(pronoun(d, 'subject'))} ${be(d)} more receptive.`;
   } else if (approach === 'favor') {
-    if (state.player.personalCash < FAVOR_COST) return fail(`A favor costs ${formatZuzu(FAVOR_COST)}; you don't have it.`);
     state.player.personalCash -= FAVOR_COST;
     if (d.traits.includes('principled')) {
       delta = -8;
@@ -1101,7 +916,7 @@ export function lobbyDirector(state: GameState, directorId: PersonId, approach: 
     const secret = d.secrets.filter((s) => s.revealed).sort((a, b) => b.severity - a.severity)[0];
     if (secret) {
       delta = 15 + 10 * secret.severity;
-      message = `You let ${name} know what you knew. ${cap(pronoun(d, 'subject'))} fell in line.`;
+      message = `You let ${name} know what you knew. ${capitalize(pronoun(d, 'subject'))} fell in line.`;
       addLifeEvent(state, directorId, 'pressured', `Was pressured over ${secret.description}`, -3, true);
     } else {
       delta = PRESSURE_BACKFIRE;
@@ -1111,73 +926,19 @@ export function lobbyDirector(state: GameState, directorId: PersonId, approach: 
   }
   adjustOpinion(state, directorId, me, delta);
   if (delta > 0) state.company.boardConfidence = clamp(state.company.boardConfidence + Math.round(delta / 8));
-  spend(state, ATTENTION_COST.lobbyDirector);
   addLog(state, `Lobbied ${name} (${approach}).`, 2, [directorId]);
   return ok(message);
 }
 
 /** Announces profit guidance for the current quarter. Only once per quarter. */
 export function setGuidance(state: GameState, amount: number): ActionResult {
-  const pre = precheck(state, ATTENTION_COST.setGuidance);
-  if (pre) return pre;
   if (state.company.guidance !== null) return fail('Guidance for this quarter is already public.');
   if (!Number.isFinite(amount) || amount <= 0) return fail('Guidance must be a positive profit figure.');
+  const blocked = spend(state, 'setGuidance');
+  if (blocked) return blocked;
   state.company.guidance = Math.round(amount);
   addLog(state, `Announced profit guidance of ${formatZuzu(state.company.guidance)} for the quarter.`, 2);
   return ok(`Guidance set at ${formatZuzu(state.company.guidance)}.`);
-}
-
-// ---- Promises ----
-
-function fulfilled(state: GameState, pr: { id: string; kind: PromiseKind; madeMonth: number; dueMonth: number; baseline?: number }, p: Person): boolean {
-  const base = pr.baseline ?? null;
-  switch (pr.kind) {
-    case 'promotion':
-      return base !== null ? ROLE_RANK[p.role] > base : isLead(state, p);
-    case 'raise':
-      return base !== null
-        ? p.salary >= base * (1 + RAISE_PROMISE_FRACTION)
-        : p.history.some((e: LifeEvent) => e.byPlayer && e.kind === 'raise' && e.month >= pr.madeMonth);
-    case 'budget':
-      return base !== null && p.unitId !== null && unit(state, p.unitId).budget > base;
-    case 'protection':
-      return state.month >= pr.dueMonth; // still employed when it falls due
-  }
-}
-
-/** Marks promises kept or broken as their due month passes, with consequences. Run monthly. */
-export function checkPromises(state: GameState): void {
-  const me = state.player.personId;
-  for (const pr of state.promises) {
-    if (pr.state !== 'open') continue;
-    const p = state.people[pr.personId];
-    if (!p) { pr.state = 'broken'; continue; }
-    if (p.status !== 'active') {
-      // Moot once they are gone; only a protection promise to someone fired counts against the player.
-      pr.state = 'broken';
-      if (pr.kind === 'protection' && p.status === 'fired') {
-        ripple(state, p.id, -BROKEN_FRIEND_OPINION, -3);
-        addLog(state, `The CEO's promise to protect ${fullName(p)} came to nothing.`, 2, [p.id]);
-      }
-      continue;
-    }
-    if (fulfilled(state, pr, p)) {
-      pr.state = 'kept';
-      adjustLoyalty(state, p.id, KEPT_LOYALTY);
-      adjustOpinion(state, p.id, me, KEPT_OPINION);
-      addLifeEvent(state, p.id, 'promiseKept', `The CEO kept ${pronoun(p, 'possessive')} promise: ${pr.detail}`, 2, true);
-      addLog(state, `Kept the promise to ${fullName(p)}: ${pr.detail}`, 1, [p.id]);
-    } else if (state.month >= pr.dueMonth) {
-      pr.state = 'broken';
-      adjustLoyalty(state, p.id, -BROKEN_LOYALTY);
-      adjustOpinion(state, p.id, me, -BROKEN_OPINION);
-      p.satisfaction = clamp(p.satisfaction - 10);
-      state.player.reputation = clamp(state.player.reputation - 2);
-      ripple(state, p.id, -BROKEN_FRIEND_OPINION, -3);
-      addLifeEvent(state, p.id, 'promiseBroken', `The CEO broke ${pronoun(p, 'possessive')} promise: ${pr.detail}`, -5, true);
-      addLog(state, `Broke the promise to ${fullName(p)}: ${pr.detail}`, 2, [p.id]);
-    }
-  }
 }
 
 /** Retire from the company. Ends the game. */

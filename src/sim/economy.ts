@@ -1,20 +1,20 @@
 // Turns people and units into numbers: performance, unit output, morale,
 // division revenue and costs, cash, quarterly earnings, share price.
-import type { DivisionStats, GameState, OrgUnit, Person, UnitId } from './types';
+import type { GameState, OrgUnit, Person, UnitId } from './types';
 import {
   activeStaff,
   addLog,
-  clamp,
   formatZuzu,
-  getRelation,
   headcount,
   isActive,
+  opinionOf,
   playerPerson,
   quarterLabel,
   unit,
   unitsUnder,
 } from './org';
 import { gaussian } from './rng';
+import { average, clamp, sum } from './util';
 
 export interface QuarterResult {
   /** Month that closed the quarter. */
@@ -51,8 +51,8 @@ export const NORMAL_BUDGET_PER_HEAD = 2_000;
 export function normalBudgetPerHead(month: number): number {
   return NORMAL_BUDGET_PER_HEAD * Math.pow(1 + BUDGET_INFLATION, Math.floor(Math.max(0, month) / 12));
 }
-/** Company-wide margin the starting base revenue is calibrated to (healthy output). */
-export const TARGET_MARGIN = 0.17;
+/** Company-wide margin the starting revenue scale is calibrated to (healthy output). */
+const TARGET_MARGIN = 0.17;
 
 const PERF_SATISFACTION = 0.25;
 const PERF_MORALE = 0.2;
@@ -90,6 +90,10 @@ const GROWTH_PER_OUTPUT = 0.00007;
 const GROWTH_DRIFT = 0.1;
 const GROWTH_MIN = -0.01;
 const GROWTH_MAX = 0.015;
+
+/** Demand multipliers are kept between these. */
+export const MARKET_MIN = 0.7;
+export const MARKET_MAX = 1.4;
 
 const NEGATIVE_CASH_CONFIDENCE_HIT = 1.5;
 
@@ -136,8 +140,10 @@ const DOWNTURN_FORGIVENESS = 0.6;
 export const RESERVE_MONTHS = 4;
 export const DIVIDEND_PAYOUT = 0.5;
 
-/** Extra per-division bookkeeping; stays plain JSON on the DivisionStats object. */
-type DivisionBook = DivisionStats & { baseRevenue?: number; growthIndex?: number };
+/** True while a business-cycle downturn is on (a boom is not one). */
+export function isDownturn(state: GameState): boolean {
+  return !!state.macro && state.macro.depth > 0 && state.month < state.macro.until;
+}
 
 // ---- Unit output --------------------------------------------------------
 
@@ -162,10 +168,6 @@ function unitHeadcount(state: GameState, u: OrgUnit): number {
   return unitsUnder(state, u.id).reduce((n, x) => n + directPeople(state, x).length, 0);
 }
 
-function avg(values: number[], fallback = 0): number {
-  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : fallback;
-}
-
 /** Each person's performance, 0–100. */
 function personPerformance(state: GameState, p: Person): number {
   const morale = p.unitId ? (state.units[p.unitId]?.morale ?? 50) : 50;
@@ -181,8 +183,8 @@ function feudPairs(state: GameState, group: Person[]): number {
   let pairs = 0;
   for (let i = 0; i < group.length; i++) {
     for (let j = i + 1; j < group.length; j++) {
-      const a = getRelation(state, group[i].id, group[j].id);
-      const b = getRelation(state, group[j].id, group[i].id);
+      const a = state.relations[group[i].id]?.[group[j].id];
+      const b = state.relations[group[j].id]?.[group[i].id];
       const feud = (r: typeof a) => r && (r.tag === 'rival' || r.tag === 'grudge') && r.opinion <= FEUD_OPINION;
       if (feud(a) || feud(b)) pairs++;
     }
@@ -198,7 +200,7 @@ function budgetEffect(ratio: number): number {
 
 /** Output lost to people recently leaving the unit; fades over a few months. */
 function churnPenalty(state: GameState, u: OrgUnit): number {
-  const c = state.unitChurn?.[u.id] ?? 0;
+  const c = state.unitChurn[u.id] ?? 0;
   if (c <= 0) return 0;
   const heads = Math.max(4, directPeople(state, u).length);
   return Math.min(CHURN_CAP, (c * CHURN_POINTS) / heads);
@@ -241,10 +243,9 @@ function unitFactors(state: GameState, u: OrgUnit): { base: number; factors: Out
     const reports = reportsOf(state, u).filter((p) => p.id !== lead!.id);
     const ops: number[] = [];
     for (const r of reports) {
-      ops.push(getRelation(state, lead!.id, r.id)?.opinion ?? 0);
-      ops.push(getRelation(state, r.id, lead!.id)?.opinion ?? 0);
+      ops.push(opinionOf(state, lead!.id, r.id), opinionOf(state, r.id, lead!.id));
     }
-    const o = avg(ops);
+    const o = average(ops);
     factors.push({ label: 'Lead and reports relations', effect: o < 0 ? o * REL_NEGATIVE : o * REL_POSITIVE });
     const group = [lead!, ...reports];
     const pairs = feudPairs(state, group);
@@ -299,7 +300,7 @@ export function computeOutputs(state: GameState): void {
 
   for (const u of postOrder(state)) {
     const { base, factors } = unitFactors(state, u);
-    if (state.unitChurn && state.unitChurn[u.id] !== undefined) {
+    if (state.unitChurn[u.id] !== undefined) {
       state.unitChurn[u.id] *= CHURN_DECAY;
       if (state.unitChurn[u.id] < 0.05) delete state.unitChurn[u.id];
     }
@@ -311,7 +312,7 @@ export function computeOutputs(state: GameState): void {
     const target =
       50 -
       MORALE_ENTROPY +
-      (avg(staff.map((p) => p.satisfaction), 50) - 50) * 0.6 +
+      (average(staff.map((p) => p.satisfaction), 50) - 50) * 0.6 +
       (lead && isActive(lead) ? (lead.skills.management - 50) * 0.3 : -10) +
       (u.output - 100) * 0.2;
     u.morale = clamp(u.morale + (clamp(target) - u.morale) * MORALE_DRIFT);
@@ -344,6 +345,22 @@ function overheadCost(state: GameState): number {
   return total;
 }
 
+/**
+ * Opens the books on the first month: sets each division's revenue scale so
+ * that, with overhead shared out by cost, the whole company clears the target
+ * margin at its first month's output.
+ */
+function calibrateDivisions(state: GameState): void {
+  const divs = Object.values(state.divisions);
+  const overhead = overheadCost(state);
+  const divTotal = sum(divs.map((d) => unitMonthlyCost(state, d.unitId)));
+  for (const d of divs) {
+    const c = unitMonthlyCost(state, d.unitId);
+    const share = divTotal > 0 ? (overhead * c) / divTotal : 0;
+    d.scale = (c + share) / (1 - TARGET_MARGIN) / (clamp(unit(state, d.unitId).output, 60, 160) / 100);
+  }
+}
+
 /** Monthly financials: division revenue and costs, cash, monthly history record. */
 export function runEconomyMonth(state: GameState): void {
   if (state.month > 0 && state.month % 12 === 0) {
@@ -351,28 +368,17 @@ export function runEconomyMonth(state: GameState): void {
     for (const u of Object.values(state.units)) u.budget = Math.round((u.budget * (1 + BUDGET_INFLATION)) / 10) * 10;
     addLog(state, `Budgets marked up ${(BUDGET_INFLATION * 100).toFixed(1)}% for the new year; market salaries are rising too.`, 1);
   }
-  const divs = Object.values(state.divisions) as DivisionBook[];
-  const costs = new Map<UnitId, number>();
-  for (const d of divs) costs.set(d.unitId, unitMonthlyCost(state, d.unitId));
-  const overhead = overheadCost(state);
-  const divTotal = [...costs.values()].reduce((a, b) => a + b, 0);
-
+  const divs = Object.values(state.divisions);
+  if (divs.some((d) => d.scale === 0)) calibrateDivisions(state);
   let revenue = 0;
-  let totalCosts = overhead;
+  let totalCosts = overheadCost(state);
   for (const d of divs) {
     const u = unit(state, d.unitId);
-    const c = costs.get(d.unitId) ?? 0;
-    if (d.baseRevenue === undefined) {
-      // Calibrate on first run: overhead is shared by cost, so the whole company clears the target margin.
-      const share = divTotal > 0 ? (overhead * c) / divTotal : 0;
-      // Divide out the starting output so the company opens at the target margin.
-      d.baseRevenue = (c + share) / (1 - TARGET_MARGIN) / (clamp(u.output, 60, 160) / 100);
-      d.growthIndex = 1;
-    }
+    const c = unitMonthlyCost(state, d.unitId);
     const targetGrowth = clamp(GROWTH_BASE + (u.output - 100) * GROWTH_PER_OUTPUT, GROWTH_MIN, GROWTH_MAX);
     d.growth = clamp(d.growth + (targetGrowth - d.growth) * GROWTH_DRIFT, GROWTH_MIN, GROWTH_MAX);
-    d.growthIndex = (d.growthIndex ?? 1) * (1 + d.growth);
-    d.revenue = Math.round(d.baseRevenue * (u.output / 100) * d.market * d.growthIndex);
+    d.scale *= 1 + d.growth;
+    d.revenue = Math.round(d.scale * (u.output / 100) * d.market);
     d.costs = Math.round(c);
     revenue += d.revenue;
     totalCosts += c;
@@ -402,8 +408,6 @@ export function runEconomyMonth(state: GameState): void {
 }
 
 // ---- Quarters -----------------------------------------------------------
-
-const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
 /**
  * The quarterly profit the board expects, given the history up to the start of
@@ -452,7 +456,6 @@ export function closeQuarter(state: GameState): QuarterResult {
   const priceBefore = co.sharePrice;
   const confBefore = co.boardConfidence;
   const expectation = boardExpectation(state, hist.slice(0, -3));
-  const downturn = (state.macro?.depth ?? 0) > 0 && state.month < (state.macro?.until ?? 0);
 
   let surprise: number | null = null;
   let priceMove = 0;
@@ -476,11 +479,10 @@ export function closeQuarter(state: GameState): QuarterResult {
   if (expectation !== null) {
     // The board also measures you against its own bar, whatever you told the market.
     const gap = (profit - expectation) / Math.max(expectation, 500_000);
-    let e = clamp(gap * EXPECT_CONF_SLOPE, EXPECT_CONF_MIN, EXPECT_CONF_MAX);
-    confMove += e;
+    confMove += clamp(gap * EXPECT_CONF_SLOPE, EXPECT_CONF_MIN, EXPECT_CONF_MAX);
   }
   // Everyone is hurting in a downturn: the board marks bad quarters down less harshly.
-  if (downturn && confMove < 0) confMove *= DOWNTURN_FORGIVENESS;
+  if (isDownturn(state) && confMove < 0) confMove *= DOWNTURN_FORGIVENESS;
   if (prior.length === 3) {
     const prev = sum(prior.map((r) => r.profit));
     const trend = (profit - prev) / Math.max(Math.abs(prev), 1_000_000);

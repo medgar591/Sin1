@@ -1,7 +1,8 @@
 import { useState } from 'preact/hooks';
 import type { BoardMeeting, FixerKind } from '../sim/types';
 import { fullName, formatZuzu, monthLabel } from '../sim/org';
-import { ATTENTION_COST, lobbyDirector } from '../sim/actions';
+import { lobbyDirector } from '../sim/actions';
+import { ATTENTION_COST } from '../sim/attention';
 import { directorSupport } from '../sim/board';
 import { quoteFixerJob, startFixerJob, type FixerQuote, type FixerRequest } from '../sim/fixer';
 import { Btn, DivBar, Empty, PersonChip, PersonLink, Seg, signed, pct } from './common';

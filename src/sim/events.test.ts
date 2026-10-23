@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { smallCompany, makePerson, makeUnit } from './testkit';
 import { expireInbox, generateEvents, resolveInboxItem } from './events';
-import type { IncidentKind } from './types';
+import type { Incident, IncidentKind } from './types';
 
 function setup() {
   const c = smallCompany(7);
@@ -9,8 +9,8 @@ function setup() {
   return c;
 }
 
-function raise(c: ReturnType<typeof setup>, kind: IncidentKind, ids: string[], data = {}) {
-  c.state.incidents.push({ kind, personIds: ids, unitId: c.team.id, data });
+function raise(c: ReturnType<typeof setup>, kind: IncidentKind, ids: string[], extra = {}) {
+  c.state.incidents.push({ kind, personIds: ids, unitId: c.team.id, ...extra } as Incident);
   generateEvents(c.state);
   return c.state.inbox[c.state.inbox.length - 1];
 }
@@ -52,7 +52,7 @@ describe('incident items', () => {
     // simulate npc firing
     c.team.memberIds = c.team.memberIds.filter((i) => i !== f.id);
     f.unitId = null; f.status = 'fired';
-    c.state.incidents.push({ kind: 'managerFiring', personIds: [c.lead.id, f.id], unitId, data: {} });
+    c.state.incidents.push({ kind: 'managerFiring', personIds: [c.lead.id, f.id], unitId });
     generateEvents(c.state);
     const item = c.state.inbox[0];
     expect(resolveInboxItem(c.state, item.id, 'overrule').ok).toBe(true);
@@ -63,7 +63,7 @@ describe('incident items', () => {
 
   it('cliqueFormed items offer break up and co-opt', () => {
     const c = setup();
-    c.state.cliques.k1 = { id: 'k1', name: 'The Old Hands', leaderId: c.lead.id, memberIds: [c.lead.id, c.workers[0].id], agenda: 'Protect seniority.', known: false };
+    c.state.cliques.k1 = { id: 'k1', name: 'The Old Hands', leaderId: c.lead.id, memberIds: [c.lead.id, c.workers[0].id], agenda: 'Protect seniority.', known: false, momentum: 0 };
     c.lead.cliqueId = 'k1'; c.workers[0].cliqueId = 'k1';
     const item = raise(c, 'cliqueFormed', [c.lead.id], { cliqueId: 'k1' });
     expect(resolveInboxItem(c.state, item.id, 'coopt').ok).toBe(true);
@@ -123,7 +123,7 @@ describe('consequences', () => {
     const c = setup();
     c.division.leadId = null;
     c.head.unitId = null;
-    c.state.incidents.push({ kind: 'promotionDemand', personIds: [], unitId: c.division.id, data: { vacantUnitId: c.division.id } });
+    c.state.incidents.push({ kind: 'seatVacancy', personIds: [], unitId: c.division.id });
     generateEvents(c.state);
     const item = c.state.inbox[0];
     expect(item.kind).toBe('seatVacancy');
@@ -166,8 +166,8 @@ describe('volume and expiry', () => {
     const c = setup();
     for (let i = 0; i < 12; i++) {
       const w = makePerson(c.state, 'worker', { unitId: c.team.id });
-      c.state.incidents.push({ kind: 'raiseDemand', personIds: [w.id], unitId: c.team.id, data: {} });
-      c.state.incidents.push({ kind: 'raiseDemand', personIds: [w.id], unitId: c.team.id, data: {} });
+      c.state.incidents.push({ kind: 'raiseDemand', personIds: [w.id], unitId: c.team.id, pct: 0.15 });
+      c.state.incidents.push({ kind: 'raiseDemand', personIds: [w.id], unitId: c.team.id, pct: 0.15 });
     }
     generateEvents(c.state);
     expect(c.state.inbox.length).toBe(6);
@@ -178,9 +178,9 @@ describe('volume and expiry', () => {
     const c = setup();
     for (let i = 0; i < 8; i++) {
       const w = makePerson(c.state, 'worker', { unitId: c.team.id });
-      c.state.incidents.push({ kind: 'raiseDemand', personIds: [w.id], unitId: c.team.id, data: {} });
+      c.state.incidents.push({ kind: 'raiseDemand', personIds: [w.id], unitId: c.team.id, pct: 0.15 });
     }
-    c.state.incidents.push({ kind: 'scandal', personIds: [c.head.id], unitId: c.division.id, data: {} });
+    c.state.incidents.push({ kind: 'scandal', personIds: [c.head.id], unitId: c.division.id });
     generateEvents(c.state);
     expect(c.state.inbox.some((i) => i.kind === 'scandal')).toBe(true);
   });
@@ -211,7 +211,7 @@ describe('world news', () => {
     for (const ind of inds) {
       const u = makeUnit(c.state, 'division', c.root.id, { name: ind });
       u.divisionId = u.id;
-      c.state.divisions[u.id] = { unitId: u.id, industry: ind, revenue: 1, costs: 1, growth: 0, market: 1 };
+      c.state.divisions[u.id] = { unitId: u.id, industry: ind, revenue: 1, costs: 1, growth: 0, market: 1, scale: 1 };
       makeUnit(c.state, 'team', u.id, { divisionId: u.id });
     }
     c.state.month = month;
@@ -254,7 +254,7 @@ it('is deterministic', () => {
     c.state.month = 12;
     for (let m = 12; m < 30; m++) {
       c.state.month = m;
-      c.state.incidents.push({ kind: 'feud', personIds: [c.workers[0].id, c.workers[1].id], unitId: c.team.id, data: {} });
+      c.state.incidents.push({ kind: 'feud', personIds: [c.workers[0].id, c.workers[1].id], unitId: c.team.id });
       generateEvents(c.state);
     }
     return JSON.stringify([c.state.log, c.state.divisions, c.state.rngState]);

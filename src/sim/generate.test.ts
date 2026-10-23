@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createPerson, generateGame, marketSalary, salaryRange, unitName, type NewGameOptions } from './generate';
-import { activeStaff, bossOf, roleForUnitKind } from './org';
+import { createPerson, generateGame, unitName, type NewGameOptions } from './generate';
+import { marketSalary, roleForUnitKind, salaryRange } from './roles';
+import { activeStaff, bossOf } from './org';
 import { emptyState } from './testkit';
 
 const OPTS: NewGameOptions = {

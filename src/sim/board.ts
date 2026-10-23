@@ -1,17 +1,16 @@
 // The board of directors: their stance on the CEO, quarterly meetings,
 // motions and votes, including the no-confidence vote that ends the game.
-import type { BoardMeeting, DirectorInfo, GameState, Motion, MotionKind, Person, PersonId, UnitId } from './types';
+import type { BoardMeeting, DirectorAgenda, DirectorInfo, GameState, Motion, MotionKind, Person, PersonId, UnitId } from './types';
 import type { QuarterResult } from './economy';
 import {
+  activeDirectors,
   activeStaff,
   addLifeEvent,
   addLog,
   adjustOpinion,
   chainOfCommand,
-  clamp,
   formatZuzu,
   fullName,
-  isActive,
   newId,
   opinionOf,
   person,
@@ -24,7 +23,8 @@ import {
 } from './org';
 import { chance, gaussian } from './rng';
 import { endGame } from './epilogue';
-import { plotProgress } from './npc';
+import { plotProgress } from './plots';
+import { clamp, sum } from './util';
 
 // ---- Tuning -------------------------------------------------------------
 
@@ -69,10 +69,10 @@ const OPINION_REVERSION = 0.06;
 function revenueGrowth(state: GameState): number {
   const h = state.company.history;
   if (h.length < 2) return 0;
-  const sum = (xs: typeof h) => xs.reduce((a, r) => a + r.revenue, 0);
+  const revenue = (xs: typeof h) => sum(xs.map((r) => r.revenue));
   if (h.length >= 6) {
-    const now = sum(h.slice(-3));
-    const before = sum(h.slice(-6, -3));
+    const now = revenue(h.slice(-3));
+    const before = revenue(h.slice(-6, -3));
     return before > 0 ? now / before - 1 : 0;
   }
   const first = h[0].revenue;
@@ -81,8 +81,8 @@ function revenueGrowth(state: GameState): number {
 
 function recentProfitMargin(state: GameState): number {
   const r = state.company.history.slice(-3);
-  const rev = r.reduce((a, x) => a + x.revenue, 0);
-  return rev > 0 ? r.reduce((a, x) => a + x.profit, 0) / rev : 0;
+  const rev = sum(r.map((x) => x.revenue));
+  return rev > 0 ? sum(r.map((x) => x.profit)) / rev : 0;
 }
 
 /** Player-caused life events in the last year, with the person they touched. */
@@ -147,12 +147,8 @@ export function directorSupport(state: GameState, directorId: PersonId): number 
 
 // ---- Meeting ------------------------------------------------------------
 
-function directorPeople(state: GameState): Person[] {
-  return state.directors.map((d) => person(state, d.personId)).filter(isActive);
-}
-
 function chairOf(state: GameState): Person {
-  const dirs = directorPeople(state);
+  const dirs = activeDirectors(state);
   return dirs.find((d) => d.role === 'chair') ?? dirs[0];
 }
 
@@ -255,18 +251,24 @@ function raiseReplaceOfficer(state: GameState, dirs: Person[]): Motion | null {
   return m;
 }
 
+const agendaOf = (state: GameState, directorId: PersonId): DirectorAgenda | undefined =>
+  state.directors.find((x) => x.personId === directorId)?.agenda;
+
+/** Directors who favour cutting spending. */
+const isHawk = (agenda: DirectorAgenda | undefined): boolean => agenda === 'safety' || agenda === 'dividends';
+
 function raiseCutBudget(state: GameState, dirs: Person[], quarter: QuarterResult): Motion | null {
   const weak = quarter.profit <= 0 || (quarter.surprise !== null && quarter.surprise < WEAK_SURPRISE);
   if (!weak) return null;
   const divs = Object.keys(state.divisions);
   if (!divs.length) return null;
   const worst = divs.slice().sort((a, b) => divisionMargin(state, a) - divisionMargin(state, b))[0];
-  const hawks = dirs.filter((d) => state.directors.find((x) => x.personId === d.id)?.agenda === 'safety' || state.directors.find((x) => x.personId === d.id)?.agenda === 'dividends');
+  const hawks = dirs.filter((d) => isHawk(agendaOf(state, d.id)));
   const proposer = (hawks.length ? hawks : dirs).slice().sort((a, b) => directorSupport(state, a.id) - directorSupport(state, b.id))[0];
   const m = motion(state, 'cutBudget', proposer, worst, `Cut ${Math.round(BUDGET_CUT * 100)}% from the budgets of ${unit(state, worst).name}, the weakest earner.`);
   tally(state, m, dirs, (d) => {
-    const agenda = state.directors.find((x) => x.personId === d.id)?.agenda;
-    const bias = agenda === 'safety' || agenda === 'dividends' ? 12 : agenda === 'growth' ? -12 : 0;
+    const agenda = agendaOf(state, d.id);
+    const bias = isHawk(agenda) ? 12 : agenda === 'growth' ? -12 : 0;
     return -0.5 * directorSupport(state, d.id) + bias + 0.2 * opinionOf(state, d.id, proposer.id) + 10;
   });
   return m;
@@ -308,7 +310,7 @@ function applyCommend(state: GameState): void {
  * endGame(state, 'ousted') from epilogue.ts. Pushes and returns the meeting.
  */
 export function runBoardMeeting(state: GameState, quarter: QuarterResult): BoardMeeting {
-  const dirs = directorPeople(state);
+  const dirs = activeDirectors(state);
   const ceo = playerPerson(state);
   const meeting: BoardMeeting = { month: state.month, motions: [], summary: '' };
 

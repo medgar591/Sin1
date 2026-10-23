@@ -139,7 +139,7 @@ describe('resolve', () => {
       resolveFixerJobs(c.state);
       if (c.state.incidents.length) {
         seen = true;
-        expect(c.state.incidents[0].kind).toBe('scandal');
+        expect(c.state.incidents[0].kind).toBe('fixerFallout');
         expect(c.state.company.boardConfidence).toBeLessThan(conf);
         expect(c.state.player.reputation).toBeLessThan(50);
       }

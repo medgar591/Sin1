@@ -1,7 +1,8 @@
 import { useState } from 'preact/hooks';
 import type { GameState, PersonId } from '../sim/types';
 import { formatZuzu, peopleUnder, fullName, isActive } from '../sim/org';
-import { allocateBonus, ATTENTION_COST, setGuidance } from '../sim/actions';
+import { allocateBonus, setGuidance } from '../sim/actions';
+import { ATTENTION_COST } from '../sim/attention';
 import { suggestedGuidance } from '../sim/economy';
 import { Bar, Btn, Primer, Sheet, Stepper, levelClass, zuzuPrice } from './common';
 import { Chart } from './charts';

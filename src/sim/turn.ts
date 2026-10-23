@@ -5,7 +5,7 @@ import { computeOutputs, runEconomyMonth, closeQuarter } from './economy';
 import { runNpcMonth } from './npc';
 import { expireInbox, generateEvents } from './events';
 import { resolveFixerJobs } from './fixer';
-import { checkPromises } from './actions';
+import { checkPromises } from './promises';
 import { runBoardMeeting } from './board';
 import { isQuarterEnd } from './org';
 

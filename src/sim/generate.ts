@@ -14,14 +14,15 @@ import type {
   Pronouns,
   RelTag,
   Role,
-  Secret,
   SecretKind,
   Skills,
   Trait,
   UnitId,
   UnitKind,
 } from './types';
-import { addLog, bossOf, clamp, fullName, newId, peopleUnder, placeAsMember, setLead, unitsUnder } from './org';
+import { addLog, addSecret, bossOf, fullName, newId, peopleUnder, placeAsMember, seatLead, unit, unitsUnder } from './org';
+import { baseName, marketSalary, roleRank, salaryBand } from './roles';
+import { clamp } from './util';
 import { chance, gaussian, pick, randInt, random, shuffle, weightedPick } from './rng';
 import {
   CLIQUE_AGENDAS,
@@ -88,7 +89,7 @@ const BUDGET_PER_HEAD: [number, number] = [1_500, 3_000];
 const MIN_UNIT_BUDGET = 10_000;
 /** Chance a team is a big one with sub-teams. */
 const SUBTEAM_PARENT_CHANCE = 0.3;
-/** Division revenue as a multiple of its costs. */
+/** Opening division revenue as a multiple of its costs (the first month's books recalibrate it). */
 const REVENUE_MARGIN: [number, number] = [1.25, 1.5];
 
 const FRIEND_RATE = 0.08;
@@ -114,6 +115,7 @@ interface RoleProfile {
   /** Years of tenure possible at most, and a floor in months. */
   tenureCap: number;
   tenureFloor: number;
+  /** Default title for someone who holds this role without a seat of their own. */
   title: string;
   manager: boolean;
 }
@@ -130,24 +132,6 @@ const ROLE_PROFILE: Record<Role, RoleProfile> = {
   director: { quality: 64, ageMin: 48, ageMax: 72, ageMean: 60, ageSd: 5, ambition: 50, involvementExp: 1.4, tenureCap: 25, tenureFloor: 36, title: 'Director', manager: true },
 };
 
-/** Yearly salary bounds per role; skill places a person within them. */
-const SALARY_RANGE: Record<Role, [number, number]> = {
-  worker: [40_000, 90_000],
-  subteamLead: [80_000, 120_000],
-  teamLead: [95_000, 150_000],
-  subdivisionHead: [160_000, 260_000],
-  divisionHead: [300_000, 500_000],
-  officer: [400_000, 700_000],
-  ceo: [1_200_000, 1_200_000],
-  chair: [250_000, 350_000],
-  director: [150_000, 250_000],
-};
-
-/** Salary bounds for a role, exported for tests and hiring logic. */
-export function salaryRange(role: Role): [number, number] {
-  return SALARY_RANGE[role];
-}
-
 const TRAITS: Trait[] = [
   'principled', 'paranoid', 'vain', 'ruthless', 'charming', 'diligent',
   'lazy', 'gossip', 'cautious', 'reckless', 'generous', 'petty',
@@ -158,21 +142,6 @@ const OPPOSED: [Trait, Trait][] = [
   ['generous', 'petty'],
   ['principled', 'ruthless'],
 ];
-
-/** Market salaries rise this much a year (the CEO's contract excepted). */
-export const WAGE_INFLATION = 0.035;
-
-/** Multiplier on the starting salary scale after `month` months of wage inflation. */
-export function wageIndex(month: number): number {
-  return Math.pow(1 + WAGE_INFLATION, Math.max(0, month) / 12);
-}
-
-/** Typical yearly salary for a role and skill level, at `month` (default: the day the game starts). */
-export function marketSalary(role: Role, quality: number, month = 0): number {
-  const [lo, hi] = SALARY_RANGE[role];
-  const idx = role === 'ceo' ? 1 : wageIndex(month);
-  return Math.round(((lo + ((hi - lo) * clamp(quality)) / 100) * idx) / 500) * 500;
-}
 
 const num = (state: GameState, centre: number, spread: number): number =>
   Math.round(clamp(centre + gaussian(state) * spread));
@@ -231,10 +200,8 @@ export function createPerson(state: GameState, opts: CreatePersonOptions): Perso
 
   const maxMonths = Math.max(0, Math.min(age - 21, prof.tenureCap)) * 12;
   const tenure = Math.max(Math.min(prof.tenureFloor, maxMonths), Math.round(random(state) * maxMonths));
-  const [lo, hi] = SALARY_RANGE[opts.role];
-  const idx = opts.role === 'ceo' ? 1 : wageIndex(state.month);
-  const salary =
-    opts.salary ?? clamp(Math.round(marketSalary(opts.role, q + gaussian(state) * 12, state.month) / 500) * 500, Math.round(lo * idx), Math.round(hi * idx));
+  const [lo, hi] = salaryBand(opts.role, state.month);
+  const salary = opts.salary ?? clamp(marketSalary(opts.role, q + gaussian(state) * 12, state.month), lo, hi);
 
   const person: Person = {
     id: newId(state, 'p'),
@@ -299,13 +266,16 @@ const FUNCTION_TEAM_NAMES: Partial<Record<FunctionKind, string[]>> = {
   finance: ['Internal Audit', 'Treasury', 'Tax and Reporting', 'Investor Relations'],
 };
 
-const FUNCTION_DEFS: { kind: FunctionKind; unit: string; title: string; skill: keyof Skills }[] = [
-  { kind: 'operations', unit: 'Operations', title: 'Chief Operating Officer', skill: 'operations' },
-  { kind: 'finance', unit: 'Finance', title: 'Chief Financial Officer', skill: 'finance' },
-  { kind: 'security', unit: 'Corporate Security', title: 'Head of Security', skill: 'guile' },
-  { kind: 'personnel', unit: 'Personnel', title: 'Head of Personnel', skill: 'management' },
-  { kind: 'legal', unit: 'Legal Affairs', title: 'General Counsel', skill: 'guile' },
+const FUNCTION_DEFS: { kind: FunctionKind; unit: string; skill: keyof Skills }[] = [
+  { kind: 'operations', unit: 'Operations', skill: 'operations' },
+  { kind: 'finance', unit: 'Finance', skill: 'finance' },
+  { kind: 'security', unit: 'Corporate Security', skill: 'guile' },
+  { kind: 'personnel', unit: 'Personnel', skill: 'management' },
+  { kind: 'legal', unit: 'Legal Affairs', skill: 'guile' },
 ];
+
+/** How likely each function's officer is to be the one passed over for CEO. */
+const ANTAGONIST_WEIGHT: Record<FunctionKind, number> = { operations: 5, finance: 3.5, security: 1.5, personnel: 1.5, legal: 1.5 };
 
 const INDUSTRIES: Industry[] = [
   'Food', 'Pharma', 'Security', 'Cyberware', 'Media', 'Logistics', 'Finance', 'Construction', 'Grid Services', 'Manastelliate',
@@ -344,8 +314,6 @@ function uniqueName(state: GameState, candidates: string[], fallbackBase: string
     if (!nameTaken(state, c)) return c;
   }
 }
-
-const baseName = (name: string): string => name.split(' (')[0];
 
 function industryOf(state: GameState, u: OrgUnit): Industry | null {
   return u.divisionId ? (state.divisions[u.divisionId]?.industry ?? null) : null;
@@ -402,8 +370,7 @@ function buildTeam(
 ): OrgUnit {
   const u = newUnit(state, kind, parentId, unitName(state, kind, parentId));
   const lead = createPerson(state, { role: kind === 'team' ? 'teamLead' : 'subteamLead' });
-  lead.title = kind === 'team' ? `Team Lead, ${baseName(u.name)}` : `Sub-Team Lead, ${u.name}`;
-  setLead(state, u.id, lead.id);
+  seatLead(state, u.id, lead.id);
   addWorkers(state, u, size - 1, titles);
   return u;
 }
@@ -412,8 +379,7 @@ function buildTeam(
 function buildDivision(state: GameState, opsId: UnitId, industry: Industry, name: string, target: number): OrgUnit {
   const div = newUnit(state, 'division', opsId, name);
   const head = createPerson(state, { role: 'divisionHead' });
-  head.title = `Division Head, ${name}`;
-  setLead(state, div.id, head.id);
+  seatLead(state, div.id, head.id);
   state.divisions[div.id] = {
     unitId: div.id,
     industry,
@@ -421,6 +387,7 @@ function buildDivision(state: GameState, opsId: UnitId, industry: Industry, name
     costs: 0,
     growth: Math.round((0.003 + random(state) * 0.007) * 10000) / 10000,
     market: Math.round((0.95 + random(state) * 0.1) * 100) / 100,
+    scale: 0, // calibrated on the first month's books
   };
   const titles = WORKER_TITLES[industry];
   let count = 1;
@@ -430,8 +397,7 @@ function buildDivision(state: GameState, opsId: UnitId, industry: Industry, name
   for (let i = 0; i < subCount; i++) {
     const sub = newUnit(state, 'subdivision', div.id, unitName(state, 'subdivision', div.id));
     const sh = createPerson(state, { role: 'subdivisionHead' });
-    sh.title = `Head, ${sub.name}`;
-    setLead(state, sub.id, sh.id);
+    seatLead(state, sub.id, sh.id);
     subs.push(sub);
     count++;
   }
@@ -478,9 +444,8 @@ function buildFunctionUnit(state: GameState, rootId: UnitId, def: (typeof FUNCTI
   const u = newUnit(state, 'function', rootId, def.unit);
   u.functionKind = def.kind;
   const officer = createPerson(state, { role: 'officer', skills: {} });
-  officer.title = def.title;
   officer.skills[def.skill] = clamp(officer.skills[def.skill] + 12);
-  setLead(state, u.id, officer.id);
+  seatLead(state, u.id, officer.id);
   return u;
 }
 
@@ -502,10 +467,6 @@ function staffFunction(state: GameState, u: OrgUnit): void {
 }
 
 // ---------------------------------------------------------------- relations
-
-const RANK: Record<Role, number> = {
-  worker: 0, subteamLead: 1, teamLead: 2, subdivisionHead: 3, divisionHead: 4, officer: 5, ceo: 6, director: 6, chair: 6,
-};
 
 /** Sets how `a` feels about `b`. Keeps an existing tag unless a new one is given. */
 function link(state: GameState, a: PersonId, b: PersonId, opinion: number, tag: RelTag | null = null): void {
@@ -590,8 +551,8 @@ function addMentorLink(state: GameState, mentor: Person, protege: Person): void 
  * 'mentor'; mentor->protege is 'protege').
  */
 function buildMentorships(state: GameState, staff: Person[]): void {
-  const mentors = staff.filter((p) => RANK[p.role] >= 2);
-  const lowerThan = (m: Person, pool: Person[]) => pool.filter((p) => RANK[p.role] <= RANK[m.role] - 2);
+  const mentors = staff.filter((p) => roleRank[p.role] >= roleRank.teamLead);
+  const lowerThan = (m: Person, pool: Person[]) => pool.filter((p) => roleRank[p.role] <= roleRank[m.role] - 2);
   // Guarantee high-level patrons for people far below them.
   for (const m of mentors.filter((p) => p.role === 'subdivisionHead' || p.role === 'divisionHead')) {
     const subtree = state.people[m.id].unitId
@@ -603,7 +564,7 @@ function buildMentorships(state: GameState, staff: Person[]): void {
   }
   const extra = Math.round(staff.length * MENTOR_RATE);
   for (let i = 0; i < extra; i++) {
-    const m = weightedPick(state, mentors, (p) => RANK[p.role] ** 2);
+    const m = weightedPick(state, mentors, (p) => roleRank[p.role] ** 2);
     let pool = m.unitId && chance(state, 0.7) ? lowerThan(m, peopleUnder(state, m.unitId).map((id) => state.people[id])) : [];
     if (!pool.length) pool = lowerThan(m, staff);
     if (pool.length) addMentorLink(state, m, pick(state, pool));
@@ -625,7 +586,7 @@ const FAKE_CREDS = [
   'Padded a decade of work history to get hired.',
 ];
 
-function makeSecret(state: GameState, p: Person, others: Person[]): Secret {
+function addRandomSecret(state: GameState, p: Person, others: Person[]): void {
   const kind = weightedPick<SecretKind>(
     state,
     ['embezzlement', 'affair', 'pastLife', 'rivalPayroll', 'addiction', 'fakeCredentials', 'coverUp'],
@@ -688,14 +649,14 @@ function makeSecret(state: GameState, p: Person, others: Person[]): Secret {
       severity = chance(state, 0.5) ? 3 : 2;
     }
   }
-  return { id: newId(state, 's'), kind, description, severity, revealed: false, involvedIds: involved };
+  addSecret(state, p.id, { kind, description, severity, involvedIds: involved });
 }
 
 function assignSecrets(state: GameState, staff: Person[]): void {
   for (const p of staff) {
     if (p.id === state.player.personId) continue;
     const prob = SECRET_BASE + SECRET_SCALE * ((p.greed + p.skills.guile) / 200);
-    if (chance(state, prob)) p.secrets.push(makeSecret(state, p, staff));
+    if (chance(state, prob)) addRandomSecret(state, p, staff);
   }
 }
 
@@ -719,6 +680,7 @@ function buildCliques(state: GameState, staff: Person[], antagonist: Person): vo
       memberIds: [leader.id],
       agenda: agendas[i % agendas.length],
       known: false,
+      momentum: 0,
     };
     const want = randInt(state, 4, 15);
     const local = leader.unitId ? peopleUnder(state, leader.unitId).map((id) => state.people[id]) : [];
@@ -818,6 +780,11 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
     fixerJobs: [],
     boardMeetings: [],
     gameOver: null,
+    unitChurn: {},
+    macro: null,
+    plots: {},
+    unitSizes: {},
+    seatVacantSince: {},
   };
   state.company.boardConfidence = randInt(state, 55, 65);
 
@@ -832,12 +799,11 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   });
   ceo.firstName = opts.playerFirstName;
   ceo.lastName = opts.playerLastName;
-  ceo.title = 'Chief Executive Officer';
   ceo.loyalty = 100;
   ceo.hiredMonth = 0;
   ceo.salary = 1_200_000;
   ceo.secrets = [];
-  setLead(state, root.id, ceo.id);
+  seatLead(state, root.id, ceo.id);
   state.player.personId = ceo.id;
 
   const chief = createPerson(state, { role: 'worker', quality: 62 });
@@ -883,9 +849,7 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   const divisionHeads = divisionUnits.map((u) => state.people[u.leadId!]);
 
   // The antagonist: passed over for CEO. Hidden; nothing is logged.
-  const antagonist = weightedPick(state, officers, (o) =>
-    o.title.startsWith('Chief Operating') ? 5 : o.title.startsWith('Chief Financial') ? 3.5 : 1.5,
-  );
+  const antagonist = weightedPick(state, officers, (o) => ANTAGONIST_WEIGHT[unit(state, o.unitId!).functionKind!]);
   antagonist.ambition = randInt(state, 90, 98);
   antagonist.loyalty = randInt(state, 8, 20);
   antagonist.involvement = Math.max(antagonist.involvement, randInt(state, 70, 90));
