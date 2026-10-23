@@ -216,6 +216,13 @@ export function AgendaCard() {
 
 // ---- Quarter ------------------------------------------------------------
 
+/** Money on the quarter card. formatZuzu rounds millions to 0.1M, so a 3.45M guidance and a 3.55M bar would read the same. */
+function formatQuarterZuzu(v: number): string {
+  const a = Math.abs(v);
+  if (a < 1e6 || a >= 1e9) return formatZuzu(v);
+  return `${v < 0 ? '-' : ''}${(a / 1e6).toFixed(2)}Mㄓ`;
+}
+
 function Tick({ pct, color, label, below }: { pct: number; color: string; label: string; below?: boolean }) {
   const p = Math.max(0, Math.min(100, pct));
   return (
@@ -237,11 +244,11 @@ function QuarterBar({ q, pick }: { q: QuarterOutlook; pick?: number | null }) {
   const proj = at(q.projected);
   const fill = (a: number, b: number) => ({ left: `${Math.min(a, b)}%`, width: `${Math.abs(b - a)}%` });
   const summary = [
-    `Booked ${formatZuzu(q.profitSoFar)}`,
-    `projected ${formatZuzu(q.projected)}`,
-    q.guidance !== null && `guidance ${formatZuzu(q.guidance)}`,
-    pick != null && `your pick ${formatZuzu(pick)}`,
-    q.expectation !== null && `board’s bar ${formatZuzu(q.expectation)}`,
+    `Booked ${formatQuarterZuzu(q.profitSoFar)}`,
+    `projected ${formatQuarterZuzu(q.projected)}`,
+    q.guidance !== null && `guidance ${formatQuarterZuzu(q.guidance)}`,
+    pick != null && `your pick ${formatQuarterZuzu(pick)}`,
+    q.expectation !== null && `board’s bar ${formatQuarterZuzu(q.expectation)}`,
   ].filter(Boolean).join(', ');
   return (
     <div class="qwrap" role="img" aria-label={summary} style={{ marginTop: q.guidance !== null || q.expectation !== null ? undefined : '0' }}>
@@ -257,22 +264,22 @@ function QuarterBar({ q, pick }: { q: QuarterOutlook; pick?: number | null }) {
   );
 }
 
-/** A gap too small to call (under 1% of the bar, or under 10K). */
-const near = (d: number, bar: number) => Math.abs(d) < Math.max(10_000, Math.abs(bar) * 0.01);
+/** A gap too small to show: under half of the 0.01M the quarter card displays. */
+const near = (d: number) => Math.abs(d) < 5_000;
 
 function verdicts(q: QuarterOutlook): { tone: string; text: string }[] {
   const out: { tone: string; text: string }[] = [];
   if (q.guidance !== null) {
     const d = q.projected - q.guidance;
-    out.push(near(d, q.guidance) ? { tone: '', text: 'Projected to land right on guidance.' } : d >= 0
-      ? { tone: 'green', text: `On track to beat guidance by ${formatZuzu(d)}.` }
-      : { tone: Math.abs(d) > Math.abs(q.guidance) * 0.1 ? 'red' : 'amber', text: `Projected to miss guidance by ${formatZuzu(-d)}.` });
+    out.push(near(d) ? { tone: '', text: 'Projected to land right on guidance.' } : d >= 0
+      ? { tone: 'green', text: `On track to beat guidance by ${formatQuarterZuzu(d)}.` }
+      : { tone: Math.abs(d) > Math.abs(q.guidance) * 0.1 ? 'red' : 'amber', text: `Projected to miss guidance by ${formatQuarterZuzu(-d)}.` });
   }
   if (q.expectation !== null) {
     const d = q.projected - q.expectation;
-    out.push(near(d, q.expectation) ? { tone: '', text: 'Projected to land right on the board’s bar.' } : d >= 0
-      ? { tone: 'green', text: `Projected to clear the board’s bar by ${formatZuzu(d)}.` }
-      : { tone: 'amber', text: `Projected to miss the board’s bar by ${formatZuzu(-d)}.` });
+    out.push(near(d) ? { tone: '', text: 'Projected to land right on the board’s bar.' } : d >= 0
+      ? { tone: 'green', text: `Projected to clear the board’s bar by ${formatQuarterZuzu(d)}.` }
+      : { tone: 'amber', text: `Projected to miss the board’s bar by ${formatQuarterZuzu(-d)}.` });
   }
   return out;
 }
@@ -286,6 +293,16 @@ interface Preset {
 const to10K = (v: number) => Math.round(v / 10_000) * 10_000;
 /** Stretch aims this far above the better of the projection and the board's bar. */
 const STRETCH = 1.05;
+/** Guidance at this share of the board's bar earns full credit (the sim's SANDBAG_FULL rule). */
+const FULL_CREDIT_SHARE = 1.02;
+
+/** The lowest guidance that earns full board credit: the bar at 102%, rounded up to the next 10K. */
+function fullCreditFrom(bar: number): number {
+  let x = Math.ceil((bar * FULL_CREDIT_SHARE) / 10_000) * 10_000;
+  // Float rounding can leave the ratio a hair short; step up until the sim agrees.
+  for (let i = 0; i < 2 && guidanceCredit(x, bar) < 1; i++) x += 10_000;
+  return x;
+}
 
 /**
  * The guidance choices offered while the player picks: Safe (the sim's
@@ -295,9 +312,11 @@ const STRETCH = 1.05;
  */
 function guidancePresets(q: QuarterOutlook, safe: number): { presets: Preset[]; start: number } {
   const bar = q.expectation === null ? null : Math.ceil(q.expectation / 10_000) * 10_000;
+  const full = q.expectation === null ? 0 : fullCreditFrom(q.expectation);
   const presets: Preset[] = [{ key: 'safe', label: 'Safe', value: safe }];
   if (bar !== null) presets.push({ key: 'bar', label: 'Board’s bar', value: bar });
-  presets.push({ key: 'stretch', label: 'Stretch', value: to10K(Math.max(q.projected, q.expectation ?? 0) * STRETCH) });
+  // Never below the full-credit line, so a beat on Stretch earns full credit.
+  presets.push({ key: 'stretch', label: 'Stretch', value: Math.max(to10K(Math.max(q.projected, q.expectation ?? 0) * STRETCH), full) });
   const usable = presets.filter((p) => p.value > 0);
   const start = bar !== null && q.projected >= bar ? bar : safe;
   return { presets: usable, start };
@@ -307,13 +326,15 @@ function guidancePresets(q: QuarterOutlook, safe: number): { presets: Preset[]; 
 function PickNotes({ q, val }: { q: QuarterOutlook; val: number }) {
   const credit = guidanceCredit(val, q.expectation);
   const reward = credit >= 1 ? { tone: 'green', text: 'If beaten: full board credit.' }
-    : credit > 0 ? { tone: 'amber', text: `If beaten: partial credit (${Math.round(credit * 100)}%).` }
+    : credit > 0 ? { tone: 'amber', text: `If beaten: partial credit (${Math.min(99, Math.round(credit * 100))}%).` }
     : { tone: 'red', text: 'If beaten: no credit. Well below the board’s bar.' };
+  const full = credit < 1 && q.expectation !== null ? fullCreditFrom(q.expectation) : null;
   const d = q.projected - val;
-  const outlook = near(d, val) ? 'The projection lands right on it.' : d > 0 ? `The projection clears it by ${formatZuzu(d)}.` : `The projection falls short by ${formatZuzu(-d)}.`;
+  const outlook = near(d) ? 'The projection lands right on it.' : d > 0 ? `The projection clears it by ${formatQuarterZuzu(d)}.` : `The projection falls short by ${formatQuarterZuzu(-d)}.`;
   return (
     <div class="pickbox small" aria-live="polite" aria-atomic="true">
       <div class={reward.tone}>{reward.text}</div>
+      {full !== null && <div>Full credit from {formatQuarterZuzu(full)}.</div>}
       <div>If missed: confidence and share price fall, and the bonus pool is thinner.</div>
       <div class="dim">{outlook}</div>
     </div>
@@ -338,9 +359,9 @@ export function QuarterCard() {
         <span class="mono small dim" style={{ whiteSpace: 'nowrap' }}>{q.monthsLeft} mo left</span>
       </div>
       <div class="stat" style={{ margin: '8px 0 0', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        <div><span class="label">Booked</span><b class={q.profitSoFar < 0 ? 'red' : ''}>{formatZuzu(q.profitSoFar)}</b></div>
-        <div><span class="label">Projected</span><b class={q.projected < 0 ? 'red' : ''}>{formatZuzu(q.projected)}</b></div>
-        <div><span class="label">Guidance</span><b class={unannounced ? 'amber' : 'cyan'}>{unannounced ? 'none' : formatZuzu(q.guidance!)}</b></div>
+        <div><span class="label">Booked</span><b class={q.profitSoFar < 0 ? 'red' : ''}>{formatQuarterZuzu(q.profitSoFar)}</b></div>
+        <div><span class="label">Projected</span><b class={q.projected < 0 ? 'red' : ''}>{formatQuarterZuzu(q.projected)}</b></div>
+        <div><span class="label">Guidance</span><b class={unannounced ? 'amber' : 'cyan'}>{unannounced ? 'none' : formatQuarterZuzu(q.guidance!)}</b></div>
       </div>
       <QuarterBar q={q} pick={unannounced ? val : null} />
       {vs.map((v, i) => <div key={i} class={v.tone} style={{ fontSize: '13px', marginTop: i ? '2px' : '0' }}>{v.text}</div>)}
@@ -350,24 +371,24 @@ export function QuarterCard() {
           <div class="label amber" style={{ marginBottom: '4px' }}>Announce guidance</div>
           <div class="hint" style={{ marginBottom: '8px' }}>
             A profit target for this quarter. Beat it and the share price and board confidence rise; miss it and both fall.
-            {q.expectation !== null && <> The board expects about <b>{formatZuzu(q.expectation)}</b>. Guiding below it earns less credit for a beat.</>}
+            {q.expectation !== null && <> The board expects about <b>{formatQuarterZuzu(q.expectation)}</b>. Guiding below it earns less credit for a beat.</>}
           </div>
           <div class="presets" role="group" aria-label="Guidance presets">
             {presets.map((p) => (
               <button key={p.key} type="button" class={`btn preset ${val === p.value ? 'on' : ''}`} aria-pressed={val === p.value} onClick={() => setAmount(p.value)}>
                 <span class="label">{p.label}</span>
-                <b class="mono">{formatZuzu(p.value)}</b>
+                <b class="mono">{formatQuarterZuzu(p.value)}</b>
               </button>
             ))}
           </div>
           <div role="group" aria-label="Guidance amount" style={{ marginTop: '8px' }}>
-            <Stepper value={val} step={step} onChange={setAmount} format={formatZuzu} min={-1e12} />
+            <Stepper value={val} step={step} onChange={setAmount} format={formatQuarterZuzu} min={-1e12} />
           </div>
           {val > 0
             ? <PickNotes q={q} val={val} />
             : <div class="pickbox small red">Guidance has to be a positive profit figure.</div>}
           <div style={{ marginTop: '8px' }}>
-            <Btn cls="primary block" cost={ATTENTION_COST.setGuidance} disabled={val <= 0} onClick={() => { if (run((s) => setGuidance(s, val))) setAmount(null); }}>Announce {formatZuzu(val)}</Btn>
+            <Btn cls="primary block" cost={ATTENTION_COST.setGuidance} disabled={val <= 0} onClick={() => { if (run((s) => setGuidance(s, val))) setAmount(null); }}>Announce {formatQuarterZuzu(val)}</Btn>
           </div>
         </div>
       )}

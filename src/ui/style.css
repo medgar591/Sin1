@@ -332,3 +332,6 @@ label.btn:focus-within { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .rvfoot { position: sticky; bottom: calc(-24px - var(--sab)); margin: 10px 0 calc(-24px - var(--sab)); padding: 8px 0 calc(24px + var(--sab)); background: #0f1419; border-top: 1px solid var(--rule); }
 .deltas { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: -6px 0 16px; }
 .delta { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; background: var(--panel2); border: 1px solid var(--rule); border-radius: 14px; font-size: 13px; }
+
+/* precision */
+html, body { word-break: keep-all; }

@@ -75,8 +75,8 @@ function TopBar() {
         <div style={{ minWidth: 0 }}>
           <div class="co">{c.name}</div>
           <div class="mono small dim">{monthLabel(g.month)}</div>
-          <div class="mono dim" style={{ fontSize: '11px', lineHeight: 1.2 }}>
-            {q.label.split(' ')[0]} · {soon ? <span class="amber">board meets this month</span> : `board in ${q.monthsLeft - 1} mo`}
+          <div class="mono dim" style={{ fontSize: '11px', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {q.label.split(' ')[0]} · {soon ? <span class="amber">board meets this month</span> : `board meets end of ${monthLabel(q.boardMonth).split(' ')[0]}`}
           </div>
         </div>
         <button class="btn primary sm" onClick={endMonthClick}>End month ▸</button>
