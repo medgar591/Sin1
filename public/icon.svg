@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#0b0e12"/>
+  <!-- Tower: a tall body on a wider base -->
+  <rect x="176" y="112" width="160" height="288" fill="#3ad6e6"/>
+  <rect x="136" y="332" width="240" height="68" fill="#3ad6e6"/>
+  <!-- Window grid cut out of the body -->
+  <g fill="#0b0e12">
+    <rect x="196" y="164" width="24" height="26"/>
+    <rect x="244" y="164" width="24" height="26"/>
+    <rect x="292" y="164" width="24" height="26"/>
+    <rect x="196" y="210" width="24" height="26"/>
+    <rect x="244" y="210" width="24" height="26"/>
+    <rect x="292" y="210" width="24" height="26"/>
+    <rect x="196" y="256" width="24" height="26"/>
+    <rect x="292" y="256" width="24" height="26"/>
+    <rect x="244" y="300" width="24" height="20"/>
+  </g>
+  <!-- Single amber accent: the corner office -->
+  <rect x="244" y="124" width="24" height="20" fill="#f2a541"/>
+</svg>
