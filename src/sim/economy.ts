@@ -30,6 +30,10 @@ export interface QuarterResult {
   sharePriceAfter: number;
   boardConfidenceBefore: number;
   boardConfidenceAfter: number;
+  /** What the board expected the quarter to deliver, if it had a bar. */
+  expectation?: number | null;
+  /** Dividend paid out of excess cash this quarter. */
+  dividend?: number;
 }
 
 export interface OutputFactor {
@@ -42,6 +46,11 @@ export interface OutputFactor {
 
 /** Normal operating budget per head per month, zuzu. */
 export const NORMAL_BUDGET_PER_HEAD = 2_000;
+
+/** Normal budget per head in a given month: it inflates every January along with unit budgets. */
+export function normalBudgetPerHead(month: number): number {
+  return NORMAL_BUDGET_PER_HEAD * Math.pow(1 + BUDGET_INFLATION, Math.floor(Math.max(0, month) / 12));
+}
 /** Company-wide margin the starting base revenue is calibrated to (healthy output). */
 export const TARGET_MARGIN = 0.17;
 
@@ -64,25 +73,68 @@ const OVERFUND_MAX = 10;
 const EMPTY_LEAD_PENALTY = 25;
 
 const MORALE_DRIFT = 0.2;
+/** Morale target loses this much: without attention (pay, bonuses, good bosses) units drift down. */
+const MORALE_ENTROPY = 2;
+/** Output points lost per recent leaver, per head of the unit (see churnPenalty). */
+const CHURN_POINTS = 8;
+const CHURN_CAP = 14;
+/** Share of recent churn that remains each month. */
+const CHURN_DECAY = 0.9;
+/** Yearly inflation of unit budgets (finance rolls them up every January). */
+export const BUDGET_INFLATION = 0.035;
 /** Share of positive lead/morale/budget effects kept at levels that have sub-units (avoids stacking). */
 const UPPER_BONUS_SHARE = 0.5;
 
-const GROWTH_BASE = 0.003;
-const GROWTH_PER_OUTPUT = 0.0003;
+const GROWTH_BASE = 0.0023;
+const GROWTH_PER_OUTPUT = 0.00007;
 const GROWTH_DRIFT = 0.1;
 const GROWTH_MIN = -0.01;
 const GROWTH_MAX = 0.015;
 
 const NEGATIVE_CASH_CONFIDENCE_HIT = 1.5;
 
-const BEAT_PRICE = 0.5;
-const BEAT_PRICE_CAP = 0.08;
+const BEAT_PRICE = 0.4;
+const BEAT_PRICE_CAP = 0.06;
 const MISS_PRICE = 1.2;
 const MISS_PRICE_CAP = 0.2;
-const NO_GUIDANCE_PRICE = -0.02;
+const NO_GUIDANCE_PRICE = -0.03;
 const TREND_PRICE = 0.03;
 const TREND_PRICE_CAP = 0.04;
-const PRICE_NOISE = 0.02;
+const PRICE_NOISE = 0.035;
+/** The share price is pulled toward trailing-year profit per share times this multiple. */
+export const PRICE_EARNINGS_MULTIPLE = 42;
+/** Share of the log gap to fair value closed each quarter, and the most it can move the price. */
+const PRICE_PULL = 0.3;
+const PRICE_PULL_CAP = 0.12;
+
+// Board expectations: the bar rises with past performance.
+/** The board expects profit to beat the same quarter a year ago by this much... */
+export const EXPECT_YOY = 0.06;
+/** ...and never to fall short of the previous quarter by more than this. */
+export const EXPECT_QOQ = -0.01;
+/** Guidance below this share of the board's expectation is sandbagging and earns no credit... */
+const SANDBAG_FLOOR = 0.94;
+/** ...and full credit needs guidance at this share of expectation. */
+const SANDBAG_FULL = 1.02;
+const BEAT_CONF_BASE = 1.5;
+const BEAT_CONF_SLOPE = 12;
+const BEAT_CONF_CAP = 5;
+/** Confidence change per unit of profit shortfall/excess against the board's own expectation. */
+const EXPECT_CONF_SLOPE = 16;
+const EXPECT_CONF_MIN = -4.5;
+const EXPECT_CONF_MAX = 2;
+/** Confidence closes this share of its gap to 50 every quarter. */
+export const CONFIDENCE_REVERSION = 0.1;
+
+/** In the first year, bad quarters hurt only this share as much (the board is still sizing you up). */
+const NEW_CEO_MONTHS = 12;
+const NEW_CEO_SLACK = 0.6;
+/** In a recession, bad quarters cost this share of their usual confidence hit. */
+const DOWNTURN_FORGIVENESS = 0.6;
+
+// Dividend policy: cash above the reserve is paid out.
+export const RESERVE_MONTHS = 4;
+export const DIVIDEND_PAYOUT = 0.5;
 
 /** Extra per-division bookkeeping; stays plain JSON on the DivisionStats object. */
 type DivisionBook = DivisionStats & { baseRevenue?: number; growthIndex?: number };
@@ -144,6 +196,14 @@ function budgetEffect(ratio: number): number {
   return OVERFUND_MAX * (1 - Math.exp(-(ratio - 1)));
 }
 
+/** Output lost to people recently leaving the unit; fades over a few months. */
+function churnPenalty(state: GameState, u: OrgUnit): number {
+  const c = state.unitChurn?.[u.id] ?? 0;
+  if (c <= 0) return 0;
+  const heads = Math.max(4, directPeople(state, u).length);
+  return Math.min(CHURN_CAP, (c * CHURN_POINTS) / heads);
+}
+
 /** Breaks a unit's output into a base and the factors that move it. */
 function unitFactors(state: GameState, u: OrgUnit): { base: number; factors: OutputFactor[] } {
   const factors: OutputFactor[] = [];
@@ -174,6 +234,9 @@ function unitFactors(state: GameState, u: OrgUnit): { base: number; factors: Out
 
   factors.push({ label: 'Morale', effect: (u.morale - 50) * MORALE_WEIGHT });
 
+  const churn = churnPenalty(state, u);
+  if (churn >= 0.5) factors.push({ label: 'Recent departures', effect: -churn });
+
   if (leadOk) {
     const reports = reportsOf(state, u).filter((p) => p.id !== lead!.id);
     const ops: number[] = [];
@@ -189,7 +252,7 @@ function unitFactors(state: GameState, u: OrgUnit): { base: number; factors: Out
   }
 
   const heads = Math.max(1, directPeople(state, u).length);
-  const ratio = u.budget / (heads * NORMAL_BUDGET_PER_HEAD);
+  const ratio = u.budget / (heads * normalBudgetPerHead(state.month));
   const be = budgetEffect(ratio);
   if (Math.abs(be) >= 0.05) factors.push({ label: be < 0 ? 'Budget starved' : 'Budget generous', effect: be });
 
@@ -236,13 +299,18 @@ export function computeOutputs(state: GameState): void {
 
   for (const u of postOrder(state)) {
     const { base, factors } = unitFactors(state, u);
+    if (state.unitChurn && state.unitChurn[u.id] !== undefined) {
+      state.unitChurn[u.id] *= CHURN_DECAY;
+      if (state.unitChurn[u.id] < 0.05) delete state.unitChurn[u.id];
+    }
     u.output = Math.round(outputOf(base, factors) * 10) / 10;
 
     // Morale drifts toward a target rather than jumping.
     const staff = directPeople(state, u);
     const lead = u.leadId ? state.people[u.leadId] : undefined;
     const target =
-      50 +
+      50 -
+      MORALE_ENTROPY +
       (avg(staff.map((p) => p.satisfaction), 50) - 50) * 0.6 +
       (lead && isActive(lead) ? (lead.skills.management - 50) * 0.3 : -10) +
       (u.output - 100) * 0.2;
@@ -278,6 +346,11 @@ function overheadCost(state: GameState): number {
 
 /** Monthly financials: division revenue and costs, cash, monthly history record. */
 export function runEconomyMonth(state: GameState): void {
+  if (state.month > 0 && state.month % 12 === 0) {
+    // Yearly roll-up: finance marks every unit budget up for inflation.
+    for (const u of Object.values(state.units)) u.budget = Math.round((u.budget * (1 + BUDGET_INFLATION)) / 10) * 10;
+    addLog(state, `Budgets marked up ${(BUDGET_INFLATION * 100).toFixed(1)}% for the new year; market salaries are rising too.`, 1);
+  }
   const divs = Object.values(state.divisions) as DivisionBook[];
   const costs = new Map<UnitId, number>();
   for (const d of divs) costs.set(d.unitId, unitMonthlyCost(state, d.unitId));
@@ -333,9 +406,39 @@ export function runEconomyMonth(state: GameState): void {
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
 /**
+ * The quarterly profit the board expects, given the history up to the start of
+ * the quarter. It ratchets with past performance: growth on the same quarter a
+ * year ago, and no slipping back from the last quarter. Null before there is
+ * anything to measure against.
+ */
+export function boardExpectation(state: GameState, history = state.company.history): number | null {
+  const q = (from: number, to: number): number | null => {
+    const part = history.slice(from, to);
+    return part.length === 3 ? sum(part.map((r) => r.profit)) : null;
+  };
+  const last = q(-3, history.length);
+  if (last === null) {
+    const est = estimatedMonthlyProfit(state) * 3;
+    return est > 0 ? est : null;
+  }
+  const lastYear = q(-12, -9);
+  let bar = last > 0 ? last * (1 + EXPECT_QOQ) : last;
+  if (lastYear !== null && lastYear > 0) bar = Math.max(bar, lastYear * (1 + EXPECT_YOY));
+  return bar > 0 ? bar : null;
+}
+
+/** Trailing-year profit per share times the earnings multiple: where the market thinks the price belongs. */
+export function fairSharePrice(state: GameState): number {
+  const h = state.company.history.slice(-12);
+  const annual = h.length ? (sum(h.map((r) => r.profit)) * 12) / h.length : 0;
+  return Math.max(1, (annual / state.company.sharesOutstanding) * PRICE_EARNINGS_MULTIPLE);
+}
+
+/**
  * Closes the quarter that ends this month: sums profit, judges it against
- * guidance, moves share price and board confidence, sets the bonus pool, and
- * clears guidance for the next quarter.
+ * guidance and the board's own expectation, moves share price and board
+ * confidence, pays the dividend, sets the bonus pool, and clears guidance for
+ * the next quarter.
  */
 export function closeQuarter(state: GameState): QuarterResult {
   const co = state.company;
@@ -348,33 +451,51 @@ export function closeQuarter(state: GameState): QuarterResult {
   const guidance = co.guidance;
   const priceBefore = co.sharePrice;
   const confBefore = co.boardConfidence;
+  const expectation = boardExpectation(state, hist.slice(0, -3));
+  const downturn = (state.macro?.depth ?? 0) > 0 && state.month < (state.macro?.until ?? 0);
 
   let surprise: number | null = null;
   let priceMove = 0;
   let confMove = 0;
   if (guidance !== null) {
     surprise = (profit - guidance) / Math.max(Math.abs(guidance), 500_000);
+    // Guidance far below what the board already expects is sandbagging: beating it earns little.
+    const credit =
+      expectation === null ? 1 : clamp((guidance / expectation - SANDBAG_FLOOR) / (SANDBAG_FULL - SANDBAG_FLOOR), 0, 1);
     if (surprise >= 0) {
-      priceMove = Math.min(BEAT_PRICE_CAP, surprise * BEAT_PRICE);
-      confMove = Math.min(7, 2 + surprise * 15);
+      priceMove = Math.min(BEAT_PRICE_CAP, surprise * BEAT_PRICE) * credit;
+      confMove = credit * Math.min(BEAT_CONF_CAP, BEAT_CONF_BASE + surprise * BEAT_CONF_SLOPE);
     } else {
       priceMove = Math.max(-MISS_PRICE_CAP, surprise * MISS_PRICE);
-      confMove = Math.max(-18, -4 + surprise * 30);
+      confMove = Math.max(-14, -3 + surprise * 22);
     }
   } else {
     priceMove = NO_GUIDANCE_PRICE;
-    confMove = -2;
+    confMove = -3;
   }
+  if (expectation !== null) {
+    // The board also measures you against its own bar, whatever you told the market.
+    const gap = (profit - expectation) / Math.max(expectation, 500_000);
+    let e = clamp(gap * EXPECT_CONF_SLOPE, EXPECT_CONF_MIN, EXPECT_CONF_MAX);
+    confMove += e;
+  }
+  // Everyone is hurting in a downturn: the board marks bad quarters down less harshly.
+  if (downturn && confMove < 0) confMove *= DOWNTURN_FORGIVENESS;
   if (prior.length === 3) {
     const prev = sum(prior.map((r) => r.profit));
     const trend = (profit - prev) / Math.max(Math.abs(prev), 1_000_000);
     priceMove += clamp(trend * TREND_PRICE, -TREND_PRICE_CAP, TREND_PRICE_CAP);
   }
+  // The price drifts toward what the trailing earnings are worth.
+  priceMove += clamp(Math.log(fairSharePrice(state) / priceBefore) * PRICE_PULL, -PRICE_PULL_CAP, PRICE_PULL_CAP);
   priceMove += gaussian(state) * PRICE_NOISE;
   if (co.cash < 0) confMove -= 4;
+  // A new CEO gets a little slack in the first year.
+  if (state.month < NEW_CEO_MONTHS && confMove < 0) confMove *= NEW_CEO_SLACK;
 
   co.sharePrice = Math.max(1, Math.round(priceBefore * (1 + priceMove) * 100) / 100);
-  co.boardConfidence = clamp(confBefore + confMove);
+  // Confidence is never permanent: it relaxes toward neutral between results.
+  co.boardConfidence = clamp(confBefore + confMove + (50 - confBefore) * CONFIDENCE_REVERSION);
 
   // Bonus pool: a share of profit, richer when guidance is beaten, thin on a miss.
   let share = 0;
@@ -396,6 +517,15 @@ export function closeQuarter(state: GameState): QuarterResult {
   co.cash -= co.bonusPool;
   co.guidance = null;
 
+  // Dividend policy: the board sweeps cash above the reserve out to shareholders.
+  const monthlyCosts = recent.length ? costs / recent.length : 0;
+  const reserve = monthlyCosts * RESERVE_MONTHS;
+  const dividend = co.cash > reserve ? Math.round(((co.cash - reserve) * DIVIDEND_PAYOUT) / 10_000) * 10_000 : 0;
+  if (dividend > 0) {
+    co.cash -= dividend;
+    state.player.personalCash += (dividend * state.player.shares) / Math.max(1, co.sharesOutstanding);
+  }
+
   const g = guidance === null ? 'no guidance' : `guidance ${formatZuzu(guidance)}`;
   addLog(
     state,
@@ -403,6 +533,7 @@ export function closeQuarter(state: GameState): QuarterResult {
     3,
   );
   addLog(state, `Bonus pool ${formatZuzu(co.bonusPool)}: ${why}.`, 2);
+  if (dividend > 0) addLog(state, `Dividend of ${formatZuzu(dividend)} paid out of cash above the ${formatZuzu(reserve)} reserve.`, 2);
 
   return {
     month: state.month,
@@ -415,6 +546,8 @@ export function closeQuarter(state: GameState): QuarterResult {
     sharePriceAfter: co.sharePrice,
     boardConfidenceBefore: confBefore,
     boardConfidenceAfter: co.boardConfidence,
+    expectation,
+    dividend,
   };
 }
 
@@ -424,11 +557,19 @@ function estimatedMonthlyProfit(state: GameState): number {
   return sum(divs.map((d) => d.revenue - d.costs)) - overheadCost(state);
 }
 
-/** A reasonable profit guidance for the coming quarter, as a default for the UI. */
+/** The default guidance is the run-rate less this much caution. */
+const SUGGEST_CAUTION = 0.97;
+
+/**
+ * A reasonable profit guidance for the coming quarter, as a default for the UI:
+ * a little under the run-rate. It is safe, but it ignores the bar the board has
+ * set (see boardExpectation), so it only earns credit while the company is
+ * growing fast enough on its own; a CEO who wants the board's applause has to
+ * guide at, or past, what the board expects.
+ */
 export function suggestedGuidance(state: GameState): number {
   const recent = state.company.history.slice(-3);
   const monthly = recent.length ? sum(recent.map((r) => r.profit)) / recent.length : estimatedMonthlyProfit(state);
-  // Slightly cautious: shave 5% off a positive run-rate (or widen a loss).
-  const target = monthly * 3 * (monthly >= 0 ? 0.95 : 1.05);
+  const target = monthly * 3 * (monthly >= 0 ? SUGGEST_CAUTION : 2 - SUGGEST_CAUTION);
   return Math.round(target / 50_000) * 50_000;
 }

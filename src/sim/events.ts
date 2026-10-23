@@ -53,6 +53,7 @@ import {
 } from './org';
 import { chance, pick, randInt, random } from './rng';
 import { createPerson } from './generate';
+import { endPlot, plotProgress, setbackPlot } from './npc';
 
 // ---------------------------------------------------------------- tuning
 
@@ -109,11 +110,36 @@ const SALARY_BAND: Record<Role, [number, number]> = {
   worker: [40_000, 90_000],
 };
 
+/** Progress a plot loses when Security watches the plotter, or when the CEO confronts one without leverage. */
+const PLOT_WATCH_SETBACK = 20;
+const PLOT_CONFRONT_SETBACK = 30;
+
 const MARKET_MIN = 0.7;
 const MARKET_MAX = 1.4;
 /** Share of the gap to 1.0 the market closes each month. */
 const MARKET_REVERSION = 0.12;
-const RANDOM_NEWS_CHANCE = 0.45;
+const RANDOM_NEWS_CHANCE = 0.3;
+
+// Business cycle: downturns (and the odd boom) hit every division at once.
+/** No cycle events in the first months, so the opening quarters are readable. */
+const CYCLE_START_MONTH = 9;
+const RECESSION_CHANCE = 1 / 24;
+const RECESSION_DEPTH: [number, number] = [4, 8]; // percent below normal demand
+const RECESSION_MONTHS: [number, number] = [7, 12];
+const BOOM_CHANCE = 1 / 70;
+const BOOM_DEPTH: [number, number] = [3, 6];
+const BOOM_MONTHS: [number, number] = [5, 8];
+/** Share of the depth that hits demand the month a cycle turns. */
+const CYCLE_SHOCK = 0.5;
+const RECESSION_HEADLINES = [
+  'A credit freeze spreads from the Pacific exchanges; every client is cutting orders.',
+  'Grid-wide austerity: the municipal blocs slash contracts and corporate budgets follow.',
+  'A run on a major lender triggers a slump in corporate spending.',
+];
+const BOOM_HEADLINES = [
+  'Reconstruction money floods the exchanges; orders are up across the board.',
+  'A supply-chain scare drives clients to lock in long contracts early.',
+];
 const BREAKTHROUGH_BONUS = 0.15; // of yearly salary, paid by the company
 const TALENT_RECRUIT_COST = 250_000;
 
@@ -297,6 +323,22 @@ const builders: Record<string, Builder> = {
     const s = live(state, inc.personIds[0]);
     const t = live(state, inc.personIds[1]);
     if (!s || !t) return null;
+    if (t.id === state.player.personId) {
+      const prog = plotProgress(state, s.id);
+      const how = prog === null ? 'is whispering' : prog >= 75 ? 'has the board half won over' : prog >= 40 ? 'is courting directors' : 'is whispering';
+      return {
+        kind: 'scheme',
+        title: `${fullName(s)} is moving against you`,
+        body: `Word reaches you that ${fullName(s)} (${titleOf(s)}) ${how} against your chair. Ambition ${s.ambition}, loyalty ${s.loyalty}.`,
+        subjectIds: [s.id, t.id],
+        unitId: inc.unitId ?? s.unitId,
+        options: [
+          { id: 'ignore', label: 'Ignore it', hint: 'The plot keeps building' },
+          { id: 'investigate', label: 'Have Security watch', hint: 'Costs 1 attention; slows the plot and may expose secrets', attention: 1 },
+          { id: 'confront', label: `Confront ${fullName(s)}`, hint: 'Costs 1 attention; works best with leverage in hand', attention: 1 },
+        ],
+      };
+    }
     return {
       kind: 'scheme',
       title: `${fullName(s)} is moving against ${fullName(t)}`,
@@ -659,11 +701,37 @@ function nudgeMarket(state: GameState, industry: Industry, delta: number): void 
   }
 }
 
-function runWorldNews(state: GameState): void {
-  // Markets drift back toward normal first, so shocks fade over a few months.
-  for (const d of Object.values(state.divisions)) {
-    d.market = clamp(d.market + (1 - d.market) * MARKET_REVERSION, MARKET_MIN, MARKET_MAX);
+/** Demand level markets are pulled toward: 1 in normal times, lower in a downturn. */
+function cycleLevel(state: GameState): number {
+  const m = state.macro;
+  return m && state.month < m.until ? 1 - m.depth : 1;
+}
+
+function runCycle(state: GameState): void {
+  const m = state.macro;
+  if (m && state.month >= m.until) {
+    state.macro = undefined;
+    if (m.depth > 0) addLog(state, 'The downturn is easing; clients are starting to spend again.', 2);
+    else addLog(state, 'The boom is cooling off.', 1);
+    return;
   }
+  if (m || state.month < CYCLE_START_MONTH) return;
+  const recession = chance(state, RECESSION_CHANCE);
+  if (!recession && !chance(state, BOOM_CHANCE)) return;
+  const depth = (recession ? randInt(state, ...RECESSION_DEPTH) : -randInt(state, ...BOOM_DEPTH)) / 100;
+  const months = recession ? randInt(state, ...RECESSION_MONTHS) : randInt(state, ...BOOM_MONTHS);
+  state.macro = { depth, until: state.month + months };
+  for (const d of Object.values(state.divisions)) d.market = clamp(d.market - depth * CYCLE_SHOCK, MARKET_MIN, MARKET_MAX);
+  addLog(state, `${monthLabel(state.month)}: ${pick(state, recession ? RECESSION_HEADLINES : BOOM_HEADLINES)} (${recession ? 'downturn' : 'boom'}, expected to last about ${months} months).`, 3);
+}
+
+function runWorldNews(state: GameState): void {
+  // Markets drift back toward the cycle's level first, so shocks fade over a few months.
+  const level = cycleLevel(state);
+  for (const d of Object.values(state.divisions)) {
+    d.market = clamp(d.market + (level - d.market) * MARKET_REVERSION, MARKET_MIN, MARKET_MAX);
+  }
+  runCycle(state);
 
   const beat = TIMELINE[state.month];
   if (beat) {
@@ -678,7 +746,7 @@ function runWorldNews(state: GameState): void {
   if (!industries.length) return;
   const ind = pick(state, industries);
   const up = chance(state, 0.5);
-  const delta = (randInt(state, 4, 10) / 100) * (up ? 1 : -1);
+  const delta = (randInt(state, 2, 6) / 100) * (up ? 1 : -1);
   nudgeMarket(state, ind, delta);
   addLog(state, `${monthLabel(state.month)}: ${pick(state, RANDOM_NEWS[ind][up ? 'up' : 'down'])} (${ind} demand ${up ? 'up' : 'down'}).`, 2);
 }
@@ -892,24 +960,40 @@ const handlers: Record<string, Handler> = {
         return ok(`You warn ${fullName(t)} quietly. ${cap(pronoun(t, 'subject'))} ${t.pronouns === 'they' ? 'are' : 'is'} on guard.`);
       case 'investigate': {
         s.investigatedMonth = state.month;
+        // Surveillance forces a plotter to lie low.
+        const slowed = setbackPlot(state, s.id, PLOT_WATCH_SETBACK);
         const found = s.secrets.filter((x) => !x.revealed).sort((x, y) => y.severity - x.severity)[0];
+        const clique = s.cliqueId ? state.cliques[s.cliqueId] : undefined;
+        if (clique) clique.known = true;
         if (found) {
           found.revealed = true;
           addLifeEvent(state, s.id, 'investigated', 'Investigated by Security over a scheme.', -2, true);
-          return ok(`Security finds that ${fullName(s)} is hiding: ${found.description}`);
+          return ok(`Security finds that ${fullName(s)} is hiding: ${found.description}${slowed ? ' The campaign stalls under watch.' : ''}`);
         }
         addLifeEvent(state, s.id, 'investigated', 'Investigated by Security over a scheme.', -1, true);
-        return ok(`Security confirms the scheme against ${fullName(t)} but finds nothing else on ${fullName(s)}.`);
+        return ok(`Security confirms the scheme against ${fullName(t)} but finds nothing else on ${fullName(s)}.${slowed ? ' The campaign stalls under watch.' : ''}`);
       }
-      case 'confront':
+      case 'confront': {
+        const leverage = s.secrets.some((x) => x.revealed && x.severity >= 2);
+        if (leverage) {
+          // Security has already found something: the schemer knows what you hold.
+          endPlot(state, s.id);
+          adjustLoyalty(state, s.id, 10);
+          s.ambition = clamp(s.ambition - 10);
+          opinionOfCeo(state, s.id, -10);
+          return ok(`You put what Security found on the table. ${fullName(s)} folds and drops it, and will not forget who holds the file.`);
+        }
         if (s.loyalty + (s.traits.includes('cautious') ? 15 : 0) >= 50) {
+          endPlot(state, s.id);
           adjustLoyalty(state, s.id, 3);
           s.ambition = clamp(s.ambition - 5);
           return ok(`${fullName(s)} backs down and drops it.`);
         }
         adjustLoyalty(state, s.id, -8);
         opinionOfCeo(state, s.id, -10);
-        return ok(`${fullName(s)} denies everything and resents being accused. The scheme goes quiet, for now.`);
+        const hit = setbackPlot(state, s.id, PLOT_CONFRONT_SETBACK);
+        return ok(`${fullName(s)} denies everything and resents being accused.${hit ? ' The scheme goes quiet and loses ground, for now.' : ' The scheme goes quiet, for now.'}`);
+      }
       default:
         adjustOpinion(state, s.id, t.id, -5);
         return ok(`You let ${fullName(s)} and ${fullName(t)} work it out.`);

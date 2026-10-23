@@ -232,6 +232,16 @@ export function removeFromCompany(
   status: Exclude<PersonStatus, 'active'>,
   fate: string,
 ): void {
+  const before = person(state, personId);
+  if (before.unitId !== null && state.units[before.unitId]) {
+    // Departures disrupt the team they leave (a lead's exit more than a worker's).
+    // A weak performer being dismissed is not a loss to the team.
+    const lead = state.units[before.unitId].leadId === personId;
+    if (lead || status !== 'fired') {
+      const churn = (state.unitChurn ??= {});
+      churn[before.unitId] = (churn[before.unitId] ?? 0) + (lead ? 2 : 1);
+    }
+  }
   detachFromUnit(state, personId);
   const p = person(state, personId);
   p.status = status;

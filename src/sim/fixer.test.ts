@@ -110,7 +110,7 @@ describe('resolve', () => {
     throw new Error('no success found');
   });
 
-  it('dirt reveals a hidden secret, or reports clean for a clean target', () => {
+  it('dirt reveals a hidden secret; a clean target is a partial result, not a success', () => {
     let revealed = false;
     let clean = false;
     for (let s = 1; s < 40; s++) {
@@ -122,7 +122,7 @@ describe('resolve', () => {
       c.state.month += 3;
       resolveFixerJobs(c.state);
       if (c.state.fixerJobs[0].state === 'success') { revealed = dirty.secrets[0].revealed; expect(c.state.fixerJobs[0].report).toContain('affair'); }
-      if (c.state.fixerJobs[1].state === 'success') { clean = /nothing found/i.test(c.state.fixerJobs[1].report!); }
+      if (c.state.fixerJobs[1].state === 'partial') { clean = /nothing found/i.test(c.state.fixerJobs[1].report!); }
       if (revealed && clean) break;
     }
     expect(revealed).toBe(true);

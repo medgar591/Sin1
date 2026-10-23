@@ -45,7 +45,7 @@ import { createPerson, marketSalary } from './generate';
 export const npcTuning = {
   // Satisfaction
   satisfactionRate: 0.25,
-  payWeight: 80,
+  payWeight: 100,
   // Incidents
   maxIncidentsPerMonth: 6,
   // Relationships
@@ -64,10 +64,20 @@ export const npcTuning = {
   plotBase: 0.05,
   plotMinAmbition: 55,
   plotMinInvolvement: 35,
-  plotGain: 2.5,
+  plotGain: 0.6,
   plotCaughtChance: 0.02,
   plotNoticeChance: 0.55,
   plotStages: [40, 75] as number[],
+  /** A plot against the CEO works on this many directors a month, at this strength (scaled up as it matures). */
+  plotBoardStep: 1.6,
+  /** Whispering campaign: board confidence a mature plot against the CEO erodes each month. */
+  plotConfidenceDrain: 0.4,
+  /** A plotter who is warm toward the CEO (loyal, liked) loses this much progress per point of warmth. */
+  plotWarmDecay: 0.15,
+  // Loyalty to the CEO drifts with how happy and well-regarded managers are, and
+  // erodes slowly at the top when the CEO never shows up.
+  loyaltyDrift: 0.04,
+  loyaltyErosion: 0.12,
   // Managers
   fireChance: 0.35,
   firePerformance: 35,
@@ -78,8 +88,11 @@ export const npcTuning = {
   fillChance: 0.7,
   externalLeadChance: 0.4,
   hireChance: 0.4,
-  raiseChance: 0.25,
+  raiseChance: 0.35,
+  raisePerformance: 55,
   seatDemandChance: 0.6,
+  /** A division or C-suite seat left empty this long is filled from below by the company itself. */
+  seatAutofillMonths: 4,
   passedOverAmbition: 50,
   // Requests
   raiseDemandChance: 0.1,
@@ -87,8 +100,10 @@ export const npcTuning = {
   resignThreatChance: 0.15,
   complaintChance: 0.08,
   // Leaving
-  quitSatisfaction: 22,
+  quitSatisfaction: 28,
   quitChance: 0.3,
+  /** Monthly chance anyone with a few months' tenure is lured away, however content (more when unhappy). */
+  baseQuit: 0.0025,
   // Events
   breakthroughChance: 0.004,
   scandalChance: 0.006,
@@ -105,6 +120,8 @@ type NpcCliqueData = Clique & { momentum?: number };
 type NpcState = GameState & {
   npcPlots?: Record<PersonId, Plot>;
   npcUnitSizes?: Record<UnitId, number>;
+  /** Month each empty division/function seat first went vacant. */
+  npcSeatVacant?: Record<UnitId, number>;
 };
 
 interface Candidate {
@@ -182,7 +199,7 @@ const isStaff = (p: Person | undefined): p is Person => !!p && isActive(p) && p.
 function marketPay(ctx: Ctx, p: Person): number {
   let v = ctx.pay.get(p.id);
   if (v === undefined) {
-    v = marketSalary(p.role, quality(p));
+    v = marketSalary(p.role, quality(p), ctx.s.month);
     ctx.pay.set(p.id, v);
   }
   return v;
@@ -272,6 +289,16 @@ function updateSatisfaction(ctx: Ctx, p: Person): void {
   const cliqueTerm = clamp((cl?.momentum ?? 0) * 2, -6, 6);
   const target = 55 + pay + bossTerm + morale + events + passed + cliqueTerm;
   p.satisfaction = clamp(p.satisfaction + (target - p.satisfaction) * T.satisfactionRate + (random(s) - 0.5) * 2);
+}
+
+/** Managers' loyalty to the CEO follows their mood and regard; senior ones cool off without contact. */
+function driftLoyalty(ctx: Ctx, p: Person): void {
+  if (!isManager(p)) return;
+  const s = ctx.s;
+  const regard = opinionOf(s, p.id, s.player.personId);
+  let d = T.loyaltyDrift * ((p.satisfaction - 50) * 0.5 + regard * 0.3);
+  if (rank(p) >= RANK.divisionHead) d -= T.loyaltyErosion;
+  p.loyalty = clamp(p.loyalty + d);
 }
 
 // ---------------------------------------------------------- relationships
@@ -584,6 +611,30 @@ function discoverEmbezzlement(ctx: Ctx, p: Person): void {
 
 // ------------------------------------------------------------- plotting
 
+/** Progress (0-100) of the plot this person is running against their boss, if any. */
+export function plotProgress(state: GameState, personId: PersonId): number | null {
+  return (state as NpcState).npcPlots?.[personId]?.progress ?? null;
+}
+
+/** The person's campaign loses `amount` progress; at zero it is over. Returns true if a plot was hit. */
+export function setbackPlot(state: GameState, personId: PersonId, amount: number): boolean {
+  const plots = (state as NpcState).npcPlots;
+  const plot = plots?.[personId];
+  if (!plots || !plot) return false;
+  plot.progress -= amount;
+  if (plot.progress <= 0) delete plots[personId];
+  else plot.stage = T.plotStages.filter((th) => th <= plot.progress).length;
+  return true;
+}
+
+/** Ends the person's campaign outright (caught, won over, or frightened off). */
+export function endPlot(state: GameState, personId: PersonId): boolean {
+  const plots = (state as NpcState).npcPlots;
+  if (!plots?.[personId]) return false;
+  delete plots[personId];
+  return true;
+}
+
 const plotsOf = (s: NpcState): Record<PersonId, Plot> => (s.npcPlots ??= {});
 
 function maybeStartPlot(ctx: Ctx, p: Person): void {
@@ -611,23 +662,35 @@ function runPlots(ctx: Ctx): void {
     }
     const cl = clique(s, p.cliqueId);
     const supporters = cl ? cl.memberIds.filter((m) => m !== pid && isStaff(s.people[m])) : [];
-    plot.progress = Math.min(100, plot.progress + (T.plotGain + p.skills.guile / 25 + supporters.length * 1.2) * (0.5 + random(s)));
+    plot.progress = Math.min(100, plot.progress + (T.plotGain + p.skills.guile / 50 + supporters.length * 0.2) * (0.5 + random(s)));
 
     if (t.role === 'ceo') {
-      // Officers work on directors against the CEO.
+      // Officers work on directors against the CEO, harder as the campaign matures.
       const dirs = s.directors.map((d) => s.people[d.personId]).filter((d) => d && isActive(d));
+      const step = T.plotBoardStep * (0.5 + plot.progress / 60);
       for (let i = 0; i < Math.min(2, dirs.length); i++) {
         const d = pick(s, dirs);
-        adjustOpinion(s, d.id, t.id, -1.5);
-        adjustOpinion(s, d.id, p.id, 1.5);
+        adjustOpinion(s, d.id, t.id, -step);
+        adjustOpinion(s, d.id, p.id, step);
+      }
+      s.company.boardConfidence = clamp(s.company.boardConfidence - T.plotConfidenceDrain * (plot.progress / 100));
+      // A plotter who has been won over lets it go.
+      const warmth = (p.loyalty - 50) * 0.5 + opinionOf(s, p.id, t.id) * 0.3;
+      if (warmth > 0) {
+        plot.progress -= warmth * T.plotWarmDecay;
+        if (plot.progress <= 0) {
+          addLog(s, `${fullName(p)} seems to have dropped whatever ${pronoun(p, 'subject')} was planning.`, 1, [p.id]);
+          delete plots[pid];
+          continue;
+        }
       }
     } else {
       const tb = bossOf(s, t.id);
-      if (tb) {
+      if (tb && tb !== p.id) {
         adjustOpinion(s, tb, t.id, -1.2);
         adjustOpinion(s, tb, p.id, 1);
       }
-      for (const m of supporters) adjustOpinion(s, m, t.id, -0.8);
+      for (const m of supporters) if (m !== t.id) adjustOpinion(s, m, t.id, -0.8);
     }
 
     const target = rank(t) >= 8 ? 8 : 0;
@@ -758,9 +821,12 @@ function leadCandidates(s: GameState, u: OrgUnit): Person[] {
 function fillVacancies(ctx: Ctx): void {
   const s = ctx.s;
   for (const u of Object.values(s.units)) {
-    if (u.leadId !== null || u.kind === 'executive') continue;
+    if (u.leadId !== null || u.kind === 'executive') {
+      if (s.npcSeatVacant) delete s.npcSeatVacant[u.id];
+      continue;
+    }
     if (u.kind === 'division' || u.kind === 'function') {
-      demandSeat(ctx, u);
+      if (!autofillSeat(ctx, u)) demandSeat(ctx, u);
       continue;
     }
     const boss = managerOfUnit(s, u);
@@ -782,7 +848,7 @@ function promote(ctx: Ctx, u: OrgUnit, promoter: Person, winner: Person, cands: 
   const s = ctx.s;
   setLead(s, u.id, winner.id);
   winner.title = titleFor(winner.role, u);
-  winner.salary = Math.max(winner.salary, roundPay(marketSalary(winner.role, quality(winner)) * 0.95));
+  winner.salary = Math.max(winner.salary, roundPay(marketSalary(winner.role, quality(winner), s.month) * 0.95));
   winner.satisfaction = clamp(winner.satisfaction + 10);
   addLifeEvent(s, winner.id, 'promoted', `Promoted to lead ${u.name}.`, 8, false);
   adjustOpinion(s, winner.id, promoter.id, 5);
@@ -818,6 +884,31 @@ function hireLead(ctx: Ctx, u: OrgUnit, boss: Person): void {
   addLog(s, `${fullName(boss)} brought in ${fullName(p)} from outside to lead ${u.name}.`, 1, [boss.id, p.id]);
 }
 
+/**
+ * A division head or officer seat nobody has filled eventually gets an acting
+ * head from below: the best insider by the company's own lights, not the CEO's.
+ * Returns true if someone was seated.
+ */
+function autofillSeat(ctx: Ctx, u: OrgUnit): boolean {
+  const s = ctx.s;
+  const since = ((s.npcSeatVacant ??= {})[u.id] ??= s.month);
+  if (s.month - since < T.seatAutofillMonths) return false;
+  const ceo = s.people[s.player.personId];
+  const cands = peopleUnder(s, u.id)
+    .map((id) => s.people[id])
+    .filter((c) => isStaff(c) && c.performance >= 40);
+  if (!cands.length || !ceo) return false;
+  const score = (c: Person) => c.performance * 0.45 + c.skills.management * 0.25 + c.ambition * 0.15 + rank(c) * 3 + (c.cliqueId ? 3 : 0);
+  const best = cands.reduce((a, b) => (score(b) > score(a) ? b : a));
+  const wasLead = best.unitId ? unit(s, best.unitId).leadId === best.id : false;
+  const from = best.unitId ? unit(s, best.unitId) : null;
+  promote(ctx, u, ceo, best, []);
+  best.title = `Acting Head, ${u.name}`;
+  delete s.npcSeatVacant[u.id];
+  addLog(s, `With the seat of ${u.name} still empty, the company installed ${fullName(best)} as acting head${wasLead && from ? `; ${from.name} loses its lead` : ''}.`, 2, [best.id]);
+  return true;
+}
+
 /** Division head and officer seats are the player's call; the best insider asks for one. */
 function demandSeat(ctx: Ctx, u: OrgUnit): void {
   const s = ctx.s;
@@ -847,7 +938,7 @@ function hireToSize(ctx: Ctx): void {
     if (!mgr || u.budget <= 0 || s.company.cash <= 0) continue;
     const q = clamp(48 + (mgr.skills.management - 50) * 0.35, 25, 85);
     const p = createPerson(s, { role: 'worker', quality: q });
-    p.salary = roundPay(marketSalary('worker', p.skills.work));
+    p.salary = roundPay(marketSalary('worker', p.skills.work, s.month));
     p.hiredMonth = s.month;
     placeAsMember(s, p.id, u.id);
     if (!p.title || p.title === 'worker') p.title = titleFor('worker', u);
@@ -863,7 +954,7 @@ function giveRaises(ctx: Ctx): void {
     const mgr = managerOfUnit(s, u);
     if (!mgr || mgr.role === 'ceo') continue;
     const c = s.people[pick(s, u.memberIds)];
-    if (!isStaff(c) || c.performance < 65 || opinionOf(s, mgr.id, c.id) < -10) continue;
+    if (!isStaff(c) || c.performance < T.raisePerformance || opinionOf(s, mgr.id, c.id) < -10) continue;
     const market = marketPay(ctx, c);
     if (c.salary >= market * 1.1 || (c.salary > market && c.satisfaction >= 60)) continue;
     const amount = Math.max(500, roundPay(c.salary * (0.03 + random(s) * 0.03)));
@@ -921,8 +1012,11 @@ function unitAncestryVacant(s: GameState, p: Person): UnitId | null {
 
 function leaving(ctx: Ctx, p: Person): void {
   const s = ctx.s;
-  if (p.satisfaction >= T.quitSatisfaction || tenure(ctx, p) < 3) return;
-  if (!chance(s, T.quitChance * (1 + (T.quitSatisfaction - p.satisfaction) / 20))) return;
+  if (tenure(ctx, p) < 3) return;
+  if (p.satisfaction >= T.quitSatisfaction) {
+    // Ordinary attrition: rival corps hire people away even from a happy company.
+    if (!chance(s, T.baseQuit * (1 + Math.max(0, 55 - p.satisfaction) / 25) * (0.7 + p.greed / 100))) return;
+  } else if (!chance(s, T.quitChance * (1 + (T.quitSatisfaction - p.satisfaction) / 20))) return;
   const valuable = p.performance >= 65 || p.skills.work >= 65 || isManager(p);
   const corp = pick(s, RIVAL_CORPS);
   if (valuable) {
@@ -1012,6 +1106,7 @@ export function runNpcMonth(state: GameState): void {
   const staff = activeStaff(s).filter(live);
 
   for (const p of staff) updateSatisfaction(ctx, p);
+  for (const p of staff) driftLoyalty(ctx, p);
   for (const p of staff) if (live(p)) tendRelations(ctx, p);
   for (const p of staff) if (live(p)) formRelation(ctx, p);
   for (const p of staff) {

@@ -151,6 +151,20 @@ materials for a unit, a special hire extracted from elsewhere, or dirt on
 someone. You pick the budget and whether it must be clean. A report comes
 back later with the result and any blowback.
 
+## Pressure
+
+What keeps a comfortable CEO from coasting:
+
+- **The board's bar ratchets.** Directors expect growth on the same quarter
+  last year. Guidance far below that earns little credit, even when beaten.
+- **Confidence drifts back toward neutral**, so goodwill has to be renewed.
+- **Dividends** pay out cash above a few months of costs, so cash can't pile up.
+- **Wage inflation and budget inflation** raise costs each year. Underpaid people
+  leave, and churn drags unit output.
+- **Business cycles**: downturns hit every division at once.
+- **Plots mature.** An ambitious, disloyal officer works the directors over
+  months. Meetings, threats, investigations and the inbox can set them back.
+
 ## Ending
 
 The game ends if a no-confidence vote passes, or if you retire. Your score

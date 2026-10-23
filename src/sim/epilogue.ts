@@ -134,7 +134,7 @@ function deedSentence(p: Person, events: LifeEvent[]): string | null {
   if (order.length === 0) return null;
   // Pay deeds read "raised her pay"; the rest take the object form ("hired her").
   const parts = order.map((k) => {
-    const pay = k === 'raise' || k === 'payCut' || k === 'options' || k === 'bonus' || k === 'bonusSnub';
+    const pay = k === 'raise' || k === 'payCut' || k === 'options';
     const o = pay ? pronoun(p, 'possessive') : pronoun(p, 'object');
     return DEEDS[k](counts[k], k === 'unitMerged' || k === 'unitDissolved' ? pronoun(p, 'possessive') : o);
   });

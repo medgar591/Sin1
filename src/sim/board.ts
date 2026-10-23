@@ -24,6 +24,7 @@ import {
 } from './org';
 import { chance, gaussian } from './rng';
 import { endGame } from './epilogue';
+import { plotProgress } from './npc';
 
 // ---- Tuning -------------------------------------------------------------
 
@@ -40,8 +41,15 @@ const CATASTROPHE_LEVEL = 15;
 const PLOTTER_AMBITION = 70;
 const PLOTTER_LOYALTY = 35;
 const ALLY_OPINION = 35;
+/** A plotting officer's allies only move against the CEO once the campaign has matured this far. */
+export const PLOT_MOTION_PROGRESS = 70;
+/** How hard a director's own support for the CEO weighs against the pull of a plotting officer. */
+const SUPPORT_WEIGHT = 1.4;
+const PLOTTER_PULL = 0.35;
 /** A director votes to oust when the lean passes this. */
-const OUST_THRESHOLD = 8;
+const OUST_THRESHOLD = 14;
+/** A motion moved by a plotter's allies needs more conviction than one forced by the numbers. */
+const PLOT_OUST_THRESHOLD = 24;
 
 const BAD_OUTPUT = 80;
 const WEAK_SURPRISE = -0.05;
@@ -51,6 +59,9 @@ const OLD_TENURE_MONTHS = 60;
 const RECENT_MONTHS = 12;
 
 const MAX_MOTIONS = 3;
+
+/** Directors' opinions of the CEO relax this share of the way toward neutral every meeting: goodwill must be kept up. */
+const OPINION_REVERSION = 0.06;
 
 // ---- Evidence from the company's recent history -------------------------
 
@@ -155,6 +166,7 @@ function plotters(state: GameState, dirs: Person[]): { officer: Person; allies: 
   const out: { officer: Person; allies: Person[] }[] = [];
   for (const o of officers(state)) {
     if (o.ambition < PLOTTER_AMBITION || o.loyalty > PLOTTER_LOYALTY) continue;
+    if ((plotProgress(state, o.id) ?? 0) < PLOT_MOTION_PROGRESS) continue;
     const allies = dirs.filter((d) => opinionOf(state, d.id, o.id) >= ALLY_OPINION);
     if (allies.length >= need) out.push({ officer: o, allies });
   }
@@ -192,13 +204,13 @@ function raiseNoConfidence(state: GameState, dirs: Person[]): Motion | null {
   if (conf < NO_CONFIDENCE_LEVEL) {
     const proposer = mostHostile(state, dirs);
     const m = motion(state, 'noConfidence', proposer, plot?.officer.id ?? null, `No confidence in the CEO: board confidence stands at ${Math.round(conf)}.`);
-    tally(state, m, dirs, (d) => -directorSupport(state, d.id) + 0.3 * opinionOf(state, d.id, proposer.id) + (plot ? 0.5 * opinionOf(state, d.id, plot.officer.id) : 0) - OUST_THRESHOLD);
+    tally(state, m, dirs, (d) => -SUPPORT_WEIGHT * directorSupport(state, d.id) + 0.3 * opinionOf(state, d.id, proposer.id) + (plot ? PLOTTER_PULL * opinionOf(state, d.id, plot.officer.id) : 0) - OUST_THRESHOLD);
     return m;
   }
   if (plot) {
     const proposer = plot.allies.slice().sort((a, b) => opinionOf(state, b.id, plot.officer.id) - opinionOf(state, a.id, plot.officer.id))[0];
     const m = motion(state, 'noConfidence', proposer, plot.officer.id, `No confidence in the CEO, moved by a director close to ${fullName(plot.officer)}.`);
-    tally(state, m, dirs, (d) => -directorSupport(state, d.id) + 0.3 * opinionOf(state, d.id, proposer.id) + 0.5 * opinionOf(state, d.id, plot.officer.id) - OUST_THRESHOLD);
+    tally(state, m, dirs, (d) => -SUPPORT_WEIGHT * directorSupport(state, d.id) + 0.3 * opinionOf(state, d.id, proposer.id) + PLOTTER_PULL * opinionOf(state, d.id, plot.officer.id) - PLOT_OUST_THRESHOLD);
     return m;
   }
   return null;
@@ -305,7 +317,8 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
   for (const d of dirs) {
     const info = state.directors.find((x) => x.personId === d.id)!;
     const delta = clamp(agendaScore(state, info) / 8 + confDelta / 3 + gaussian(state) * 0.5, -6, 6);
-    adjustOpinion(state, d.id, ceo.id, Math.round(delta * 10) / 10);
+    const drift = -opinionOf(state, d.id, ceo.id) * OPINION_REVERSION;
+    adjustOpinion(state, d.id, ceo.id, Math.round((delta + drift) * 10) / 10);
   }
 
   // 2. Motions.

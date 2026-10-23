@@ -143,7 +143,12 @@ function roll(state: GameState, job: FixerJob): Outcome {
 export function resolveFixerJobs(state: GameState): void {
   for (const job of state.fixerJobs) {
     if (job.state !== 'pending' || job.resolveMonth > state.month) continue;
-    const outcome = roll(state, job);
+    let outcome = roll(state, job);
+    if (outcome === 'success' && job.kind === 'dirt') {
+      // Digging up nothing on a clean target is not a win.
+      const t = job.targetPersonId ? state.people[job.targetPersonId] : undefined;
+      if (!t || !t.secrets.some((x) => !x.revealed)) outcome = 'partial';
+    }
     job.state = outcome;
     const q = quoteFixerJob(state, job);
     const handler = { materials, specialHire, dirt }[job.kind];

@@ -159,10 +159,19 @@ const OPPOSED: [Trait, Trait][] = [
   ['principled', 'ruthless'],
 ];
 
-/** Typical yearly salary for a role and skill level. */
-export function marketSalary(role: Role, quality: number): number {
+/** Market salaries rise this much a year (the CEO's contract excepted). */
+export const WAGE_INFLATION = 0.035;
+
+/** Multiplier on the starting salary scale after `month` months of wage inflation. */
+export function wageIndex(month: number): number {
+  return Math.pow(1 + WAGE_INFLATION, Math.max(0, month) / 12);
+}
+
+/** Typical yearly salary for a role and skill level, at `month` (default: the day the game starts). */
+export function marketSalary(role: Role, quality: number, month = 0): number {
   const [lo, hi] = SALARY_RANGE[role];
-  return Math.round((lo + ((hi - lo) * clamp(quality)) / 100) / 500) * 500;
+  const idx = role === 'ceo' ? 1 : wageIndex(month);
+  return Math.round(((lo + ((hi - lo) * clamp(quality)) / 100) * idx) / 500) * 500;
 }
 
 const num = (state: GameState, centre: number, spread: number): number =>
@@ -223,8 +232,9 @@ export function createPerson(state: GameState, opts: CreatePersonOptions): Perso
   const maxMonths = Math.max(0, Math.min(age - 21, prof.tenureCap)) * 12;
   const tenure = Math.max(Math.min(prof.tenureFloor, maxMonths), Math.round(random(state) * maxMonths));
   const [lo, hi] = SALARY_RANGE[opts.role];
+  const idx = opts.role === 'ceo' ? 1 : wageIndex(state.month);
   const salary =
-    opts.salary ?? clamp(Math.round(marketSalary(opts.role, q + gaussian(state) * 12) / 500) * 500, lo, hi);
+    opts.salary ?? clamp(Math.round(marketSalary(opts.role, q + gaussian(state) * 12, state.month) / 500) * 500, Math.round(lo * idx), Math.round(hi * idx));
 
   const person: Person = {
     id: newId(state, 'p'),

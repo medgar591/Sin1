@@ -343,6 +343,8 @@ export interface PlayerPromise {
   dueMonth: Month;
   detail: string;
   state: 'open' | 'kept' | 'broken';
+  /** Hidden bookkeeping: salary, rank or budget when the promise was made. */
+  baseline?: number;
 }
 
 export type FixerKind = 'materials' | 'specialHire' | 'dirt';
@@ -430,6 +432,23 @@ export interface GameState {
   boardMeetings: BoardMeeting[];
 
   gameOver: GameOver | null;
+
+  /**
+   * Recent leavers per unit (decays monthly); drags the unit's output while
+   * the team re-forms. Optional so older saves load.
+   */
+  unitChurn?: Record<UnitId, number>;
+  /**
+   * The business cycle. depth > 0 is a downturn (demand sits that far below
+   * normal until `until`), depth < 0 a boom. Optional so older saves load.
+   */
+  macro?: MacroCycle;
+}
+
+export interface MacroCycle {
+  depth: number;
+  /** Month the cycle ends (demand is pulled back to normal afterwards). */
+  until: Month;
 }
 
 /** Result of a player action. Actions mutate state in place. */

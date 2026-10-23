@@ -98,8 +98,10 @@ describe('runBoardMeeting', () => {
     const plotter = makePerson(f.state, 'officer', { unitId: f.finance.id, ambition: 90, loyalty: 10 });
     for (const d of f.state.directors.slice(0, 3)) {
       adjustOpinion(f.state, d.personId, plotter.id, 80);
-      adjustOpinion(f.state, d.personId, f.ceo.id, -40);
+      adjustOpinion(f.state, d.personId, f.ceo.id, -60);
     }
+    // The campaign has matured: only then do the plotter's allies move.
+    (f.state as unknown as { npcPlots: Record<string, unknown> }).npcPlots = { [plotter.id]: { targetId: f.ceo.id, progress: 90, stage: 2 } };
     runBoardMeeting(f.state, quarter({ boardConfidenceAfter: 55, boardConfidenceBefore: 55 }));
     expect(endGame).toHaveBeenCalled();
   });

@@ -427,3 +427,16 @@ it('chain helper sanity', () => {
   const { state, workers } = smallCompany();
   expect(chainOfCommand(state, workers[0].id).length).toBe(3);
 });
+
+describe('firing an officer', () => {
+  it('costs two attention and dents board confidence', () => {
+    const f = smallCompany(2);
+    f.state.company.boardConfidence = 60;
+    f.state.player.attentionLeft = 1;
+    expect(A.fire(f.state, f.cfo.id).ok).toBe(false);
+    f.state.player.attentionLeft = 2;
+    expect(A.fire(f.state, f.cfo.id).ok).toBe(true);
+    expect(f.state.player.attentionLeft).toBe(0);
+    expect(f.state.company.boardConfidence).toBeLessThan(60);
+  });
+});

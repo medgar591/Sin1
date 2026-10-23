@@ -122,8 +122,10 @@ describe('runEconomyMonth', () => {
 describe('closeQuarter', () => {
   it('beating guidance raises price and confidence and sets a bonus pool', () => {
     const f = fixture();
-    seedHistory(f.state, [900_000, 1_000_000, 1_100_000]);
-    f.state.company.guidance = 2_400_000;
+    seedHistory(f.state, [900_000, 1_000_000, 1_100_000, 900_000, 1_000_000, 1_100_000]);
+    f.state.company.sharePrice = 45; // a little below what trailing earnings are worth
+    f.state.company.boardConfidence = 60; // confidence relaxes toward 50, so start mid-range
+    f.state.company.guidance = 2_900_000;
     const q = closeQuarter(f.state);
     expect(q.profit).toBe(3_000_000);
     expect(q.surprise).toBeGreaterThan(0);
@@ -137,9 +139,13 @@ describe('closeQuarter', () => {
     const beat = fixture();
     const miss = fixture();
     const none = fixture();
-    for (const f of [beat, miss, none]) seedHistory(f.state, [1_000_000, 1_000_000, 1_000_000]);
-    beat.state.company.guidance = 2_700_000;
-    miss.state.company.guidance = 3_300_000;
+    for (const f of [beat, miss, none]) {
+      seedHistory(f.state, [1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000]);
+      f.state.company.boardConfidence = 50;
+      f.state.month = 20; // past the new-CEO grace period // no pull toward neutral
+    }
+    beat.state.company.guidance = 2_850_000;
+    miss.state.company.guidance = 3_150_000;
     const b = closeQuarter(beat.state);
     const m = closeQuarter(miss.state);
     const n = closeQuarter(none.state);

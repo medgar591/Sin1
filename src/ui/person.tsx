@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import type { Person, PersonId, PromiseKind, Skills } from '../sim/types';
 import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead } from '../sim/org';
 import {
-  ATTENTION_COST, demote, fire, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
+  ATTENTION_COST, demote, fire, fireAttentionCost, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
   type MeetingApproach, type SkipLevelInfo,
 } from '../sim/actions';
 import { Bar, Btn, ConfirmBtn, DivBar, PersonChip, PersonLink, Seg, Sheet, Stepper, intelVisible, levelClass, signed, unitLabel } from './common';
@@ -23,11 +23,11 @@ function SkipWarn({ id }: { id: PersonId }) {
     return <div class="okbox">On your radar{p.attentionReason ? ` (${p.attentionReason})` : ''}: no skip-level penalty.</div>;
   }
   if (info.bypassed.length === 0 || info.penalty === 0) return null;
-  const names = info.bypassed.map((b) => g.people[b]?.lastName ?? '?');
-  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+  const parts = info.bypassed.map((b, i) => `${g.people[b]?.lastName ?? '?'} −${info!.penalties?.[i] ?? info!.penalty}`);
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
   return (
     <div class="warnbox">
-      Skip-level: you'll go around {list}. {names[0]} (their boss) loses {info.penalty} loyalty{names.length > 1 ? ', the others about half that' : ''}.
+      Skip-level: you'll go around {list} loyalty.
       {' '}Anyone on your radar is exempt.
     </div>
   );
@@ -92,7 +92,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
               <Btn onClick={() => tog('salary')}>Salary</Btn>
               <Btn onClick={() => tog('options')}>Options</Btn>
               <Btn onClick={() => run((s) => investigatePerson(s, id))} cost={ATTENTION_COST.investigatePerson}>Investigate</Btn>
-              <ConfirmBtn label="Fire" cls="danger" cost={ATTENTION_COST.fire} onClick={() => run((s) => fire(s, id))} />
+              <ConfirmBtn label="Fire" cls="danger" cost={fireAttentionCost(game(), id)} onClick={() => run((s) => fire(s, id))} />
             </div>
 
             <div class="hint">{leads ? 'Leads can be promoted, demoted or fired, not reassigned.' : 'Reassign moves them as a member; Promote makes them a lead.'}</div>
