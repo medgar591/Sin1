@@ -182,11 +182,33 @@ describe('askProgress and judgeAsks', () => {
     f.workers[1].history.push(ev('fired', false));
     f.workers[2].hiredMonth = -80;
     f.workers[2].history.push(ev('promoted'));
-    expect(askProgress(f.state, a)).toMatchObject({ value: 0, met: true, label: '0 purges (limit 0)' });
+    expect(askProgress(f.state, a)).toMatchObject({ value: 0, met: true, lost: false, label: '0 purges (limit 0)' });
     f.lead.hiredMonth = -61;
     f.lead.history.push(ev('demoted'));
-    expect(askProgress(f.state, a)).toMatchObject({ value: 1, met: false, label: '1 purge (limit 0)' });
+    expect(askProgress(f.state, a)).toMatchObject({ value: 1, met: false, lost: true, label: '1 purge (limit 0)' });
     expect(judgeAsks(f.state)[0].met).toBe(false);
+  });
+
+  it('only a purge is lost before the ask is judged; the other asks can still be recovered', () => {
+    const f = smallCompany();
+    f.state.month = 2;
+    const progress = (kind: AskKind, over: Partial<BoardAsk> = {}) => askProgress(f.state, ask(f.state, f.directors[0].id, kind, over));
+    expect(progress('revenueGrowth', { target: 9_500_000, baseline: 9_000_000 })).toMatchObject({ met: false, lost: false });
+    expect(progress('margin', { target: 0.2, baseline: 0.1 })).toMatchObject({ met: false, lost: false });
+    expect(progress('shakeUp', { target: 3 })).toMatchObject({ met: false, lost: false });
+    f.workers[0].history.push({ month: 1, kind: 'demoted', text: 'demoted', impact: 0, byPlayer: true });
+    f.workers[0].hiredMonth = -80;
+    expect(progress('noPurge', { target: 0 })).toMatchObject({ met: false, lost: true });
+    // Allowing one purge keeps it alive until a second.
+    expect(progress('noPurge', { target: 1 })).toMatchObject({ met: true, lost: false });
+  });
+
+  it('a judged ask is lost only if it was missed', () => {
+    const f = smallCompany();
+    const missed = ask(f.state, f.directors[0].id, 'shakeUp', { target: 3, state: 'missed' });
+    const met = ask(f.state, f.directors[0].id, 'shakeUp', { target: 3, state: 'met' });
+    expect(askProgress(f.state, missed)).toMatchObject({ met: false, lost: true });
+    expect(askProgress(f.state, met)).toMatchObject({ met: true, lost: false });
   });
 
   it('never throws on a missing director or an empty history', () => {

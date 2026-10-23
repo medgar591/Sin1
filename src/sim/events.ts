@@ -1562,7 +1562,10 @@ function misconduct(state: GameState, item: InboxItem, opt: string, kind: 'leak'
 
 function applyResolution(state: GameState, item: InboxItem, optionId: string): ActionResult {
   const result = handlers[item.kind](state, item, optionId);
-  if (result.ok) item.resolution = optionId;
+  if (result.ok) {
+    item.resolution = optionId;
+    item.outcome = result.message;
+  }
   return result;
 }
 

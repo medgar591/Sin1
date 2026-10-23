@@ -28,6 +28,9 @@ function Visitor({ it }: { it: InboxItem }) {
   );
 }
 
+/** Open items the month's end will settle with their first option. The Inbox and the End month sheet both count this set. */
+export const expiringItems = (g: GameState): InboxItem[] => g.inbox.filter((i) => i.resolution === null && i.expiresMonth <= g.month && i.options.length > 0);
+
 /** What happens if the player lets the item lapse: the first option, applied as the month closes. */
 function Fallback({ it }: { it: InboxItem }) {
   const first = it.options[0];
@@ -69,7 +72,10 @@ function Item({ it, done }: { it: InboxItem; done?: boolean }) {
         {it.unitId && g.units[it.unitId] && <button type="button" class="chip" onClick={() => openUnit(it.unitId!)}><span class="nm">{g.units[it.unitId].name}</span></button>}
       </div>
       {done ? (
-        <div class="small">Decision: <b>{res?.label ?? it.resolution}</b></div>
+        <div class="small">
+          Decision: <b>{res?.label ?? it.resolution}</b>
+          {it.outcome && <span class="dim" style={{ display: 'block', marginTop: '2px' }}>{it.outcome}</span>}
+        </div>
       ) : (
         <div class="stack" style={{ marginTop: '6px' }}>
           {it.options.map((o) => (
@@ -154,7 +160,7 @@ function settleSquabbles(ids: string[]) {
 }
 
 /** Feuds on the floor, one line each (tap for the full card), with one button to leave them all to the default. */
-function Squabbles({ items }: { items: InboxItem[] }) {
+function Squabbles({ items, expiring }: { items: InboxItem[]; expiring: number }) {
   const g = game();
   const first = items[0].options[0];
   const same = items.every((i) => i.options[0]?.label === first.label);
@@ -162,6 +168,7 @@ function Squabbles({ items }: { items: InboxItem[] }) {
   return (
     <div class="card squab">
       <b>Squabbles on the floor ({items.length})</b>
+      {expiring > 0 && <div class="small amber"><b>{expiring === items.length ? 'All expire' : `${expiring} of ${items.length} expire`} this month.</b></div>}
       <div class="small dim" style={{ margin: '2px 0 4px' }}>Feuds between staff who don’t lead a unit. Open one to settle it yourself.</div>
       {items.map((it) => (
         <details key={it.id}>
@@ -181,21 +188,26 @@ export function Inbox() {
   const doneCount = g.inbox.length - open.length;
   const floor = open.filter((i) => isSquabble(g, i));
   const bundle = floor.length > 1 ? floor : [];
+  const expiring = new Set(expiringItems(g));
   const cards = open
     .filter((i) => !bundle.includes(i))
-    .map((it, ix) => ({ it, ix, soon: it.expiresMonth <= g.month, rank: rank(g, it) }))
+    .map((it, ix) => ({ it, ix, soon: expiring.has(it), rank: rank(g, it) }))
     .sort((a, b) => Number(b.soon) - Number(a.soon) || b.rank - a.rank || b.it.month - a.it.month || a.ix - b.ix);
   const soon = cards.filter((c) => c.soon);
   const later = cards.filter((c) => !c.soon);
+  // A bundle with any squabble expiring this month sits under the expiring heading, and those squabbles are counted there.
+  const bundleSoon = bundle.filter((i) => expiring.has(i)).length;
+  const soonCount = soon.length + bundleSoon;
   return (
     <div>
       <h2>Waiting to see you <span class="mono">{open.length}</span></h2>
       {open.length === 0 && <Empty>Nobody is waiting to see you.</Empty>}
-      {soon.length > 0 && <div class="label" style={{ margin: '4px 0 6px' }}>Expiring this month ({soon.length})</div>}
+      {soonCount > 0 && <div class="label" style={{ margin: '4px 0 6px' }}>Expiring this month ({soonCount})</div>}
       {soon.map((c) => <Item key={c.it.id} it={c.it} />)}
-      {soon.length > 0 && (later.length > 0 || bundle.length > 0) && <div class="label" style={{ margin: '12px 0 6px' }}>Later</div>}
+      {bundleSoon > 0 && <Squabbles items={bundle} expiring={bundleSoon} />}
+      {soonCount > 0 && (later.length > 0 || (bundle.length > 0 && bundleSoon === 0)) && <div class="label" style={{ margin: '12px 0 6px' }}>Later</div>}
       {later.map((c) => <Item key={c.it.id} it={c.it} />)}
-      {bundle.length > 0 && <Squabbles items={bundle} />}
+      {bundle.length > 0 && bundleSoon === 0 && <Squabbles items={bundle} expiring={0} />}
       {doneCount > 0 && <History count={doneCount} />}
     </div>
   );

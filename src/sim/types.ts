@@ -314,6 +314,8 @@ export interface InboxItem {
   options: InboxOption[];
   /** Option chosen by the player, once resolved. */
   resolution: string | null;
+  /** What came of the decision (the action's message), once resolved; absent in older saves. */
+  outcome?: string;
   /** Unresolved items auto-resolve with their first option after this month. */
   expiresMonth: Month;
   data: InboxData;

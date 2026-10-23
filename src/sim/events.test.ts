@@ -53,6 +53,7 @@ describe('incident items', () => {
       const r = resolveInboxItem(c.state, it2.id, opt.id);
       expect(r.ok, `${kind}/${opt.id}: ${r.message}`).toBe(true);
       expect(it2.resolution).toBe(opt.id);
+      expect(it2.outcome, `${kind}/${opt.id}`).toBe(r.message);
     }
   });
 
@@ -301,6 +302,14 @@ describe('volume and expiry', () => {
     expect(item.resolution).toBe(item.options[0].id);
     expect(c.workers[0].salary).toBe(salary);
     expect(c.state.log.some((l) => l.text.includes('No response'))).toBe(true);
+    expect(item.outcome).toBeTruthy();
+    expect(c.state.log.some((l) => l.text.includes(item.outcome!))).toBe(true);
+  });
+
+  it('keeps nothing for an item that is still waiting', () => {
+    const c = setup();
+    const item = raise(c, 'raiseDemand', [c.workers[0].id]);
+    expect(item.outcome).toBeUndefined();
   });
 
   it('does not expire early', () => {

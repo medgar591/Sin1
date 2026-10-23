@@ -10,7 +10,7 @@ import { BonusSheet, Dashboard } from './dashboard';
 import { scrollToQuarter } from './agenda';
 import { OrgView, UnitSheet } from './org';
 import { PersonSheet } from './person';
-import { Inbox } from './inbox';
+import { Inbox, expiringItems } from './inbox';
 import { BoardView } from './board';
 import { IntroSheet } from './intro';
 import { MoreView } from './more';
@@ -48,8 +48,7 @@ function doEndMonth() {
 
 /** What is still open that the month's end will settle without the CEO. */
 function outstanding(g: GameState) {
-  const expiring = pendingInbox(g).filter((i) => i.expiresMonth <= g.month && i.options.length > 0);
-  return { guidance: g.company.guidance === null, bonus: g.company.bonusPool, expiring };
+  return { guidance: g.company.guidance === null, bonus: g.company.bonusPool, expiring: expiringItems(g) };
 }
 
 function endMonthClick() {

@@ -14,7 +14,7 @@ vi.mock('./generate', async () => {
 import * as A from './actions';
 import { checkPromises } from './promises';
 import { buildEpilogue, computeScore, endGame } from './epilogue';
-import { chainOfCommand, setTag } from './org';
+import { chainOfCommand, fullName, setTag } from './org';
 
 function checkTree(state: GameState) {
   const root = state.units[state.rootUnitId];
@@ -340,6 +340,20 @@ describe('investigation', () => {
     const { state, workers } = smallCompany();
     expect(A.investigatePerson(state, workers[0].id).ok).toBe(false);
     expect(state.player.attentionLeft).toBe(3);
+  });
+  it('says so when nothing new turns up, and counts what is already on file', () => {
+    const { state, workers } = withSecurity();
+    state.player.attentionLeft = 9;
+    const w = workers[0];
+    w.secrets = [];
+    expect(A.investigatePerson(state, w.id).message).toContain(`found nothing damaging on ${fullName(w)}.`);
+    w.secrets = [
+      { id: 's1', kind: 'embezzlement', description: 'skimming', severity: 3, revealed: true, involvedIds: [] },
+      { id: 's2', kind: 'embezzlement', description: 'more skimming', severity: 3, revealed: true, involvedIds: [] },
+    ];
+    expect(A.investigatePerson(state, w.id).message).toContain(`found nothing new on ${fullName(w)} (2 secrets already on file).`);
+    w.secrets.pop();
+    expect(A.investigatePerson(state, w.id).message).toContain('(1 secret already on file)');
   });
   it('reveals secrets and marks cliques', () => {
     const { state, workers, team } = withSecurity();

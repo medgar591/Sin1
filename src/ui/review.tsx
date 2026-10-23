@@ -2,7 +2,7 @@
 import type { ComponentChildren } from 'preact';
 import type { GameState, Motion } from '../sim/types';
 import { fullName, formatZuzu, monthLabel, quarterLabel } from '../sim/org';
-import { quarterOutlook, type QuarterOutlook } from '../sim/economy';
+import { guidanceCredit, quarterOutlook, type QuarterOutlook } from '../sim/economy';
 import { NO_CONFIDENCE_LEVEL } from '../sim/board';
 import { Sheet, zuzuPrice } from './common';
 import { OpenAsks, MeetingView, showFixerJobs } from './board';
@@ -12,8 +12,12 @@ const LONG_MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'Jul
 const longMonth = (m: number) => `${LONG_MONTH[((m % 12) + 12) % 12]} ${monthLabel(m).split(' ')[1]}`;
 const shortMonth = (m: number) => monthLabel(m).split(' ')[0];
 
-/** How many of the month's log lines the review shows. */
+/** How many of the month's log lines the review shows, and how many sit under a quarter's report card. */
 const MAX_LOG = 4;
+const MAX_LOG_ALSO = 3;
+
+/** Log lines a quarter's report card already carries: the close, bonus pool, dividend, the board meeting, its motions and the asks it judged. */
+const ON_THE_CARD = /^(Q\d \d{4} closed:|Bonus pool |Dividend of |Board meeting:|The board )|'s ask was (met|missed): /;
 
 /** Signed whole number with a true minus: +6, −4, 0. */
 export const sgn = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
@@ -32,6 +36,8 @@ export interface MonthSnapshot {
   inbox: Set<string>;
   pendingJobs: Set<string>;
   meetings: number;
+  /** Length of the log, so the review shows only what the advance appended to it. */
+  logLen: number;
 }
 
 /** Captures the numbers and ids worth comparing after End month; call before `advanceMonth`. */
@@ -47,11 +53,21 @@ export function snapshotMonth(g: GameState): MonthSnapshot {
     inbox: new Set(g.inbox.map((i) => i.id)),
     pendingJobs: new Set(g.fixerJobs.filter((j) => j.state === 'pending').map((j) => j.id)),
     meetings: g.boardMeetings.length,
+    logLen: g.log.length,
   };
 }
 
+/** What the advance put in front of the CEO: its notable log lines, new inbox items, fixer reports and unspent attention. */
+export interface MonthEvents {
+  log: { text: string; major: boolean }[];
+  newInbox: number;
+  waiting: number;
+  reports: { what: string; state: string }[];
+  attentionLeft: number;
+}
+
 /** The month in review, as plain data (it sits in the sheet list). */
-export interface ReviewData {
+export interface ReviewData extends MonthEvents {
   /** The month that closed. */
   month: number;
   profit: number | null;
@@ -61,28 +77,19 @@ export interface ReviewData {
   conf: [number, number];
   /** The quarter as it stands after the month. */
   quarter: QuarterOutlook;
-  log: { text: string; major: boolean }[];
-  newInbox: number;
-  waiting: number;
-  reports: { what: string; state: string }[];
-  attentionLeft: number;
 }
 
 const FIXER_KIND = { materials: 'Materials', specialHire: 'Special hire', dirt: 'Dirt' };
 const FIXER_STATE = { success: 'Succeeded', partial: 'Partly succeeded', failed: 'Failed', pending: 'Pending' };
 
-/** Builds the month in review from the snapshot and the advanced state. */
-export function monthReview(b: MonthSnapshot, g: GameState): ReviewData {
-  const c = g.company;
-  const h = c.history;
-  const last = h[h.length - 1];
-  const rec = last && last.month === b.month ? last : null;
-  const prev = rec ? h[h.length - 2] : undefined;
+/** The advance's own events, from the log lines it appended (`onCard`: leave out what a report card says). */
+function monthEvents(b: MonthSnapshot, g: GameState, max: number, onCard = false): MonthEvents {
   const log = g.log
+    .slice(b.logLen)
     .map((l, i) => ({ l, i }))
-    .filter(({ l }) => l.month === b.month && l.importance >= 2)
+    .filter(({ l }) => l.importance >= 2 && !(onCard && ON_THE_CARD.test(l.text)))
     .sort((a, z) => z.l.importance - a.l.importance || a.i - z.i)
-    .slice(0, MAX_LOG)
+    .slice(0, max)
     .map(({ l }) => ({ text: l.text, major: l.importance === 3 }));
   const reports = g.fixerJobs
     .filter((j) => b.pendingJobs.has(j.id) && j.state !== 'pending')
@@ -92,6 +99,23 @@ export function monthReview(b: MonthSnapshot, g: GameState): ReviewData {
     });
   const waiting = g.inbox.filter((i) => i.resolution === null);
   return {
+    log,
+    newInbox: waiting.filter((i) => !b.inbox.has(i.id)).length,
+    waiting: waiting.length,
+    reports,
+    attentionLeft: b.attentionLeft,
+  };
+}
+
+/** Builds the month in review from the snapshot and the advanced state. */
+export function monthReview(b: MonthSnapshot, g: GameState): ReviewData {
+  const c = g.company;
+  const h = c.history;
+  const last = h[h.length - 1];
+  const rec = last && last.month === b.month ? last : null;
+  const prev = rec ? h[h.length - 2] : undefined;
+  return {
+    ...monthEvents(b, g, MAX_LOG),
     month: b.month,
     profit: rec ? rec.profit : null,
     prevProfit: prev ? prev.profit : null,
@@ -99,11 +123,6 @@ export function monthReview(b: MonthSnapshot, g: GameState): ReviewData {
     share: [b.sharePrice, c.sharePrice],
     conf: [b.boardConfidence, c.boardConfidence],
     quarter: quarterOutlook(g),
-    log,
-    newInbox: waiting.filter((i) => !b.inbox.has(i.id)).length,
-    waiting: waiting.length,
-    reports,
-    attentionLeft: b.attentionLeft,
   };
 }
 
@@ -115,6 +134,11 @@ export interface QuarterCard {
   bar: number | null;
   share: [number, number];
   conf: [number, number];
+  cash: [number, number];
+  /** The dividend the close paid, as the log printed it ("3.1Mㄓ"). */
+  dividend: string | null;
+  /** The month's other news, under the card. */
+  also: MonthEvents;
 }
 
 /** Builds the report card for the board meeting that the advance just held. */
@@ -128,6 +152,9 @@ export function quarterCard(b: MonthSnapshot, g: GameState): QuarterCard {
     bar: b.outlook.expectation,
     share: [b.sharePrice, g.company.sharePrice],
     conf: [b.boardConfidence, g.company.boardConfidence],
+    cash: [b.cash, g.company.cash],
+    dividend: g.log.slice(b.logLen).map((l) => /^Dividend of (\S+) paid out/.exec(l.text)?.[1]).find(Boolean) ?? null,
+    also: monthEvents(b, g, MAX_LOG_ALSO, true),
   };
 }
 
@@ -169,6 +196,41 @@ export function quarterVerdict(q: QuarterOutlook): { tone: string; text: string 
   if (near(d, q.guidance)) return { tone: '', text: 'Projected to land right on guidance.' };
   if (d >= 0) return { tone: 'green', text: `On track to beat guidance by ${formatZuzu(d)}.` };
   return { tone: Math.abs(d) > Math.abs(q.guidance) * 0.1 ? 'red' : 'amber', text: `Projected to miss guidance by ${formatZuzu(-d)}.` };
+}
+
+/** The month's notable lines, then what is waiting on the CEO: inbox, fixer reports, unspent attention. */
+function Happened({ d, heading, empty }: { d: MonthEvents; heading: string; empty?: string }) {
+  return (
+    <>
+      <div class="label" style={{ margin: '14px 0 2px' }}>{heading}</div>
+      {d.log.length === 0 && empty && <div class="hint" style={{ padding: '4px 0' }}>{empty}</div>}
+      {d.log.map((l, i) => (
+        <div key={i} class="lmrow rvlog">
+          <span class={`mark ${l.major ? 'm2' : 'm1'}`} />
+          <div class="grow" style={{ fontWeight: l.major ? 600 : 400 }}>{l.major && <span class="sr-only">Major: </span>}{l.text}</div>
+        </div>
+      ))}
+      <div class="rvnext">
+        <div class="rvline">
+          <span class="grow">
+            {d.newInbox > 0 ? `${d.newInbox} new in the inbox` : 'Nothing new in the inbox'}
+            {d.waiting > d.newInbox ? ` (${d.waiting} waiting).` : '.'}
+          </span>
+          {d.waiting > 0 && <button type="button" class="btn sm" onClick={() => setTab('inbox')}>See who’s waiting</button>}
+        </div>
+        {d.reports.length > 0 && (
+          <div class="rvline">
+            <span class="grow">
+              {d.reports.length === 1 ? 'A fixer report came in.' : `${d.reports.length} fixer reports came in.`}
+              {d.reports.map((r, i) => <span key={i} class="small dim clip" style={{ display: 'block' }}>{r.state}: {r.what}</span>)}
+            </span>
+            <button type="button" class="btn sm" onClick={showFixerJobs}>See the reports</button>
+          </div>
+        )}
+        {d.attentionLeft > 0 && <div class="hint">You left {d.attentionLeft} attention unspent.</div>}
+      </div>
+    </>
+  );
 }
 
 // ---- Month in review ----------------------------------------------------
@@ -218,34 +280,7 @@ export function ReviewSheet({ d }: { d: ReviewData }) {
         <div class="hint" style={{ marginTop: '2px' }}>Share price and confidence update when the board meets.</div>
       </div>
 
-      <div class="label" style={{ margin: '14px 0 2px' }}>What happened</div>
-      {d.log.length === 0 && <div class="hint" style={{ padding: '4px 0' }}>Nothing notable on the record this month.</div>}
-      {d.log.map((l, i) => (
-        <div key={i} class="lmrow rvlog">
-          <span class={`mark ${l.major ? 'm2' : 'm1'}`} />
-          <div class="grow" style={{ fontWeight: l.major ? 600 : 400 }}>{l.major && <span class="sr-only">Major: </span>}{l.text}</div>
-        </div>
-      ))}
-
-      <div class="rvnext">
-        <div class="rvline">
-          <span class="grow">
-            {d.newInbox > 0 ? `${d.newInbox} new in the inbox` : 'Nothing new in the inbox'}
-            {d.waiting > d.newInbox ? ` (${d.waiting} waiting).` : '.'}
-          </span>
-          {d.waiting > 0 && <button type="button" class="btn sm" onClick={() => setTab('inbox')}>See who’s waiting</button>}
-        </div>
-        {d.reports.length > 0 && (
-          <div class="rvline">
-            <span class="grow">
-              {d.reports.length === 1 ? 'A fixer report came in.' : `${d.reports.length} fixer reports came in.`}
-              {d.reports.map((r, i) => <span key={i} class="small dim clip" style={{ display: 'block' }}>{r.state}: {r.what}</span>)}
-            </span>
-            <button type="button" class="btn sm" onClick={showFixerJobs}>See the reports</button>
-          </div>
-        )}
-        {d.attentionLeft > 0 && <div class="hint">You left {d.attentionLeft} attention unspent.</div>}
-      </div>
+      <Happened d={d} heading="What happened" empty="Nothing notable on the record this month." />
 
       <div class="rvfoot">
         <button type="button" class="btn primary block" onClick={closeSheet}>Continue</button>
@@ -255,6 +290,24 @@ export function ReviewSheet({ d }: { d: ReviewData }) {
 }
 
 // ---- Quarter closed -----------------------------------------------------
+
+/**
+ * One plain line on why the quarter moved the price and confidence, worded from `closeQuarter`: only a beat earns
+ * credit, scaled by how high the guidance was set against the board's bar; a miss or no guidance takes the full hit.
+ */
+export function guidanceNote(c: Pick<QuarterCard, 'profit' | 'guidance' | 'bar' | 'share'>): string {
+  // The price also drifts toward what the past year's earnings are worth, whatever the verdict.
+  const drift = c.share[1] > c.share[0] ? ' The price still rose: it also drifts toward what the past year’s earnings are worth.' : '';
+  if (c.guidance === null) return `With no guidance, the quarter counted against you.${drift}`;
+  if (c.profit < c.guidance) return `Profit fell short of guidance, so the full penalty applied; it grows with the size of the miss.${drift}`;
+  const hit = `${near(c.profit - c.guidance, c.guidance) ? 'meeting' : 'beating'} guidance earned`;
+  if (c.bar === null) return `The board had no bar for this quarter: ${hit} the full price and confidence gain.`;
+  const credit = guidanceCredit(c.guidance, c.bar);
+  const at = `Guided at ${Math.round((c.guidance / c.bar) * 100)}% of the board’s bar`;
+  if (credit >= 1) return `${at}: ${hit} the full price and confidence gain.`;
+  if (credit <= 0) return `${at}, which counts as sandbagging: ${hit} no price or confidence gain.`;
+  return `${at}: ${hit} ${Math.round(credit * 100)}% of the usual price and confidence gain.`;
+}
 
 /** Words and a verdict for profit against a bar: "Beat guidance by 120Kㄓ". Reaching the bar counts as meeting it, as the sim does. */
 function judge(profit: number, bar: number, noun: string): { ok: boolean; text: string } {
@@ -286,6 +339,7 @@ export function BoardResult({ index, card }: { index: number; card: QuarterCard 
   const bar = card.bar === null ? null : judge(card.profit, card.bar, 'the board’s bar');
   const pricePct = card.share[0] > 0 ? Math.round((card.share[1] / card.share[0] - 1) * 1000) / 10 : 0;
   const dConf = Math.round(card.conf[1]) - Math.round(card.conf[0]);
+  const dCash = Math.round(card.cash[1] - card.cash[0]);
   return (
     <Sheet title={`${card.label} closed`}>
       {vote && <div class="warnbox" style={{ marginBottom: '10px', fontWeight: 600 }}><Survived mo={vote} /></div>}
@@ -294,6 +348,7 @@ export function BoardResult({ index, card }: { index: number; card: QuarterCard 
         <Row label="Guidance">
           <span class="mono v">{card.guidance === null ? 'none' : formatZuzu(card.guidance)}</span>
           <span class="small"><Verdict {...guide} /></span>
+          <span class="hint rvnote">{guidanceNote(card)}</span>
         </Row>
         {bar && card.bar !== null && (
           <Row label="Board’s bar">
@@ -310,6 +365,11 @@ export function BoardResult({ index, card }: { index: number; card: QuarterCard 
           <span class="small"><Chg d={dConf} text={sgn(dConf)} /></span>
           <span class="hint rvnote">Below {NO_CONFIDENCE_LEVEL} the board can vote you out.{card.conf[1] < NO_CONFIDENCE_LEVEL && ' You are below that now.'}</span>
         </Row>
+        <Row label="Cash">
+          <span class="mono v"><Flow a={formatZuzu(card.cash[0])} b={formatZuzu(card.cash[1])} /></span>
+          <span class="small"><Chg d={dCash} text={sgnZuzu(dCash)} /></span>
+          {card.dividend && <span class="hint rvnote">Includes a {card.dividend} dividend paid to shareholders.</span>}
+        </Row>
         {pool > 0 && (
           <Row label="Bonus pool">
             <b class="mono v">{formatZuzu(pool)}</b>
@@ -324,6 +384,7 @@ export function BoardResult({ index, card }: { index: number; card: QuarterCard 
           <OpenAsks asks={nextAsks} />
         </div>
       )}
+      <Happened d={card.also} heading="Also this month" />
       <div class="rvfoot">
         <button type="button" class="btn primary block" onClick={closeSheet}>Continue</button>
       </div>

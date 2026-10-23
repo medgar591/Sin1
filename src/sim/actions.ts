@@ -908,10 +908,13 @@ export function investigatePerson(state: GameState, personId: PersonId): ActionR
     addLifeEvent(state, personId, 'investigated', 'Found out Security had been digging into them.', -1, true);
   }
   addLog(state, `${fullName(head)} investigated ${fullName(p)}.`, 2, [personId, head.id]);
+  const onFile = p.secrets.filter((s) => s.revealed).length;
   const body = found.length
-    ? `${found.length === 1 ? 'a secret' : `${found.length} secrets`}: ${found.map((s) => s.description).join('; ')}`
-    : 'nothing damaging';
-  return ok(`${shortName(head)}'s team found ${body} on ${fullName(p)}.${saw ? ` ${capitalize(pronoun(p, 'subject'))} noticed.` : ''}`);
+    ? `${found.length === 1 ? 'a secret' : `${found.length} secrets`}: ${found.map((s) => s.description).join('; ')} on ${fullName(p)}.`
+    : onFile
+      ? `nothing new on ${fullName(p)} (${onFile === 1 ? '1 secret' : `${onFile} secrets`} already on file).`
+      : `nothing damaging on ${fullName(p)}.`;
+  return ok(`${shortName(head)}'s team found ${body}${saw ? ` ${capitalize(pronoun(p, 'subject'))} noticed.` : ''}`);
 }
 
 /** Security digs into a unit: reveals feuds, cliques and who really does the work there. */

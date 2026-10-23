@@ -339,10 +339,6 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
 
   // 3. Apply results.
   const lines: string[] = [];
-  const q = quarterLabel(quarter.month);
-  const pct = quarter.surprise === null ? 0 : Math.round(quarter.surprise * 100);
-  const g = quarter.surprise === null ? 'with no guidance given' : pct === 0 ? 'in line with guidance' : `${pct > 0 ? 'beating' : 'missing'} guidance by ${Math.abs(pct)}%`;
-  lines.push(`${q}: profit ${formatZuzu(quarter.profit)}, ${g}. Board confidence ${Math.round(quarter.boardConfidenceAfter)}.`);
   if (asks.length) lines.push(`Directors' asks: ${asks.filter((a) => a.met).length} of ${asks.length} met.`);
   for (const m of motions) {
     const yes = Object.values(m.votes).filter(Boolean).length;
@@ -353,6 +349,11 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
     else if (m.kind === 'cutBudget') applyCutBudget(state, m);
     else if (m.kind === 'commend') applyCommend(state);
   }
+  // The headline comes last so the confidence it quotes is where the asks and motions left it.
+  const q = quarterLabel(quarter.month);
+  const pct = quarter.surprise === null ? 0 : Math.round(quarter.surprise * 100);
+  const g = quarter.surprise === null ? 'with no guidance given' : pct === 0 ? 'in line with guidance' : `${pct > 0 ? 'beating' : 'missing'} guidance by ${Math.abs(pct)}%`;
+  lines.unshift(`${q}: profit ${formatZuzu(quarter.profit)}, ${g}. Board confidence ${Math.round(state.company.boardConfidence)}.`);
   meeting.motions = motions;
   meeting.summary = lines.join(' ');
   state.boardMeetings.push(meeting);

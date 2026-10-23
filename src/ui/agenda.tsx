@@ -117,13 +117,22 @@ export function buildAgenda(g: GameState): AgendaItem[] {
     if (sup < TURNING_AT) out.push({ key: `turn${d.personId}`, tone: 2, who: d.personId, go: () => openPerson(d.personId), text: <><b>{name(d.personId)}</b> is turning against you.</>, sub: 'A director who loses faith votes you out.' });
   }
 
-  const behind = (g.asks ?? []).filter((a) => a.state === 'open' && g.people[a.directorId] && !askProgress(g, a).met);
+  const live = (g.asks ?? []).filter((a) => a.state === 'open' && g.people[a.directorId]).map((a) => ({ a, pr: askProgress(g, a) }));
+  const behind = live.filter(({ pr }) => !pr.met && !pr.lost);
   if (behind.length) {
-    const due = Math.min(...behind.map((a) => a.dueMonth));
+    const due = Math.min(...behind.map(({ a }) => a.dueMonth));
     out.push({
       key: 'asks', tone: 1, go: scrollToAsks,
       text: <>{behind.length} board {behind.length === 1 ? 'ask is' : 'asks are'} not on track yet.</>,
       sub: `Due by ${monthLabel(due)}.`,
+    });
+  }
+  const lost = live.filter(({ pr }) => pr.lost).length;
+  if (lost) {
+    out.push({
+      key: 'asksLost', tone: 1, go: scrollToAsks,
+      text: <>{lost === 1 ? 'A board ask is' : `${lost} board asks are`} already missed.</>,
+      sub: lost === 1 ? 'It can’t be met now; that director will cool at the meeting.' : 'They can’t be met now; those directors will cool at the meeting.',
     });
   }
 

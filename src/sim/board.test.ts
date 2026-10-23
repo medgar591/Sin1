@@ -51,6 +51,18 @@ describe('runBoardMeeting', () => {
     expect(endGame).not.toHaveBeenCalled();
   });
 
+  it('the summary quotes the confidence the meeting leaves, after the motions have moved it', () => {
+    const f = fixture();
+    f.state.company.boardConfidence = 60;
+    const meeting = runBoardMeeting(f.state, quarter({ surprise: 0.2, profit: 2_400_000, boardConfidenceAfter: 60 }));
+    expect(meeting.motions.some((m) => m.kind === 'commend' && m.passed)).toBe(true);
+    const conf = Math.round(f.state.company.boardConfidence);
+    expect(conf).toBeGreaterThan(60);
+    expect(meeting.summary).toMatch(/^Q\d \d{4}: profit .*Board confidence \d+\./);
+    expect(meeting.summary).toContain(`Board confidence ${conf}.`);
+    expect(meeting.summary).not.toContain('Board confidence 60.');
+  });
+
   it('weak quarter targets the worst division with a budget cut', () => {
     const f = fixture();
     f.state.company.boardConfidence = 50;

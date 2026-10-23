@@ -4,7 +4,7 @@ import { fullName, formatZuzu, monthLabel, shortName } from '../sim/org';
 import { FAVOR_COST, lobbyDirector } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
 import { directorSupport } from '../sim/board';
-import { AGENDA_PLAIN, askProgress } from '../sim/asks';
+import { AGENDA_PLAIN, askProgress, type AskProgress } from '../sim/asks';
 import { quoteFixerJob, startFixerJob, type FixerQuote, type FixerRequest } from '../sim/fixer';
 import { Btn, ConfirmBtn, DivBar, Empty, PersonChip, PersonLink, Seg, signed, pct } from './common';
 import { PersonPicker, UnitPicker } from './pickers';
@@ -34,6 +34,12 @@ function Names({ ids }: { ids: string[] }) {
   );
 }
 
+/** Where an open ask stands, in words as well as colour: on track, missed for good (a purge cannot be undone), or not yet. */
+function AskTag({ pr }: { pr: AskProgress }) {
+  const [tone, text] = pr.lost ? ['red', '✗ missed'] : pr.met ? ['green', '✓ on track'] : ['amber', 'not yet'];
+  return <span class={`tag ${tone}`} style={{ flex: 'none' }}>{text}</span>;
+}
+
 /** Open board asks with the director's face, what they want, and how it stands. Tap for the director. Directors who carry the same ask share one row. */
 export function OpenAsks({ asks }: { asks: BoardAsk[] }) {
   const g = game();
@@ -48,7 +54,7 @@ export function OpenAsks({ asks }: { asks: BoardAsk[] }) {
       {groups.map((grp) => {
         const a = grp[0];
         const pr = askProgress(g, a);
-        const tag = <span class={`tag ${pr.met ? 'green' : 'amber'}`} style={{ flex: 'none' }}>{pr.met ? '✓ on track' : 'not yet'}</span>;
+        const tag = <AskTag pr={pr} />;
         if (grp.length === 1) {
           return (
             <button key={a.id} class="item agrow" onClick={() => openPerson(a.directorId)}>
@@ -119,7 +125,7 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
           : (mo.passed ? 'Against you: the motion carried.' : 'Good for you: the motion was defeated.');
         return (
           <div key={mo.id} style={{ borderTop: '1px solid var(--rule)', padding: '8px 0' }}>
-            <div class="row"><b class="grow">{mo.summary}</b><span class={`tag ${good ? 'green' : 'red'}`} style={{ flex: 'none' }}>{mo.passed ? '✓ passed' : '✗ defeated'}</span></div>
+            <div class="row"><b class="grow">{mo.summary}</b><span class={`tag ${good ? 'green' : 'red'}`} style={{ flex: 'none' }}>{mo.passed ? 'passed' : 'defeated'}</span></div>
             <div class="small dim">{MOTION[mo.kind] ?? mo.kind} · proposed by {g.people[mo.proposerId] ? fullName(g.people[mo.proposerId]) : '?'}</div>
             <div class="small"><span class={good ? 'green' : 'red'}>{sense}</span></div>
             <div class="small mono">Vote {yes.length}–{no.length}{yes.length === no.length ? ', the chair broke the tie' : ''}</div>
@@ -223,7 +229,7 @@ export function BoardView() {
                         <div style={{ fontSize: '13px', marginTop: '2px' }}>{ask.text}</div>
                         <div class="small dim mono" style={{ marginTop: '2px' }}>{pr.label}</div>
                       </div>
-                      <span class={`tag ${pr.met ? 'green' : 'amber'}`} style={{ flex: 'none' }}>{pr.met ? '✓ on track' : 'not yet'}</span>
+                      <AskTag pr={pr} />
                     </div>
                   </div>
                 )}

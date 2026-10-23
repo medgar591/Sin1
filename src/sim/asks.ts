@@ -51,6 +51,8 @@ export interface AskProgress {
   target: number;
   /** Whether the ask would be met if judged now. */
   met: boolean;
+  /** True when it can no longer be met before it is judged (a purge cannot be undone). */
+  lost: boolean;
   /** Short human label, e.g. "1.8Mㄓ of 1.9Mㄓ". */
   label: string;
 }
@@ -125,27 +127,27 @@ function measure(state: GameState, ask: BoardAsk, finalQuarter: boolean): AskPro
   switch (ask.kind) {
     case 'revenueGrowth': {
       const value = fig ? fig.revenue : ask.baseline;
-      return { value, target, met: value >= target, label: `${formatZuzu(value)} of ${formatZuzu(target)}` };
+      return { value, target, met: value >= target, lost: false, label: `${formatZuzu(value)} of ${formatZuzu(target)}` };
     }
     case 'margin': {
       const value = fig ? fig.margin : ask.baseline;
-      return { value, target, met: value >= target, label: `${pct(value)} of ${pct(target)}` };
+      return { value, target, met: value >= target, lost: false, label: `${pct(value)} of ${pct(target)}` };
     }
     case 'costControl': {
       const value = fig ? fig.costs : ask.baseline;
-      return { value, target, met: value <= target, label: `${formatZuzu(value)} (limit ${formatZuzu(target)})` };
+      return { value, target, met: value <= target, lost: false, label: `${formatZuzu(value)} (limit ${formatZuzu(target)})` };
     }
     case 'fillSeats': {
       const value = vacancies(state);
-      return { value, target, met: value <= target, label: plural(value, 'vacancy', 'vacancies') };
+      return { value, target, met: value <= target, lost: false, label: plural(value, 'vacancy', 'vacancies') };
     }
     case 'shakeUp': {
       const value = personnelCount(state, ask, false);
-      return { value, target, met: value >= target, label: `${value} of ${target} changes` };
+      return { value, target, met: value >= target, lost: false, label: `${value} of ${target} changes` };
     }
     case 'noPurge': {
       const value = personnelCount(state, ask, true);
-      return { value, target, met: value <= target, label: `${plural(value, 'purge', 'purges')} (limit ${target})` };
+      return { value, target, met: value <= target, lost: value > target, label: `${plural(value, 'purge', 'purges')} (limit ${target})` };
     }
   }
 }
@@ -153,7 +155,7 @@ function measure(state: GameState, ask: BoardAsk, finalQuarter: boolean): AskPro
 /** How an ask stands right now. Safe on any state: missing directors and empty history just fall back to the baseline. */
 export function askProgress(state: GameState, ask: BoardAsk): AskProgress {
   const now = measure(state, ask, false);
-  return ask.state === 'open' ? now : { ...now, met: ask.state === 'met' };
+  return ask.state === 'open' ? now : { ...now, met: ask.state === 'met', lost: ask.state === 'missed' };
 }
 
 // ---- Issuing ------------------------------------------------------------
