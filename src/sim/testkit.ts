@@ -40,6 +40,7 @@ export function emptyState(seed = 1): GameState {
     plots: {},
     unitSizes: {},
     seatVacantSince: {},
+    asks: [],
   };
 }
 

@@ -13,6 +13,7 @@ import type {
   Industry,
   Person,
   PersonId,
+  Secret,
   UnitId,
 } from './types';
 import {
@@ -23,9 +24,14 @@ import {
   adjustOpinion,
   adjustSatisfaction,
   be,
+  bossOf,
   chainOfCommand,
+  chiefOfStaff,
   formatZuzu,
   fullName,
+  functionHead,
+  getRelation,
+  hasAttention,
   have,
   isActive,
   isLead,
@@ -39,6 +45,7 @@ import {
   removeFromCompany,
   revealSecrets,
   seatLead,
+  setTag,
   unit,
   verb,
 } from './org';
@@ -51,6 +58,7 @@ import { endPlot, plotProgress, setbackPlot } from './plots';
 import { makePromise } from './promises';
 import { trySpend } from './attention';
 import { ripple } from './ties';
+import { speak } from './voice';
 
 // ---------------------------------------------------------------- tuning
 
@@ -73,6 +81,8 @@ const KIND_PRIORITY: Record<InboxKind, number> = {
   managerFiring: 6,
   poachOffer: 6,
   fixerFallout: 9,
+  tipOff: 7,
+  pitch: 6,
   seatVacancy: 8,
   breakthrough: 5,
   feud: 5,
@@ -86,6 +96,15 @@ const KIND_PRIORITY: Record<InboxKind, number> = {
 /** Progress a plot loses when Security watches the plotter, or when the CEO confronts one without leverage. */
 const PLOT_WATCH_SETBACK = 20;
 const PLOT_CONFRONT_SETBACK = 30;
+/** Progress a plot loses when the CEO warns its target away from a pitcher's campaign. */
+const PITCH_WARN_SETBACK = 30;
+/** Progress a pitcher's plot gains when the CEO backs it. */
+const PITCH_BACK_BOOST = 20;
+/** Chance a backed pitcher's rival finds out; gossips make it likelier. */
+const PITCH_LEAK_CHANCE = 0.3;
+const PITCH_LEAK_GOSSIP = 0.2;
+/** Thank-you bonus for a tip-off, as a share of yearly salary. */
+const TIPOFF_BONUS = 0.05;
 
 /** Share of the gap to 1.0 the market closes each month. */
 const MARKET_REVERSION = 0.12;
@@ -159,6 +178,8 @@ interface Draft {
   options: InboxOption[];
   data?: InboxData;
   expiryMonths?: number;
+  speakerId?: PersonId | null;
+  quote?: string;
 }
 
 type Builders = { [K in IncidentKind]: (state: GameState, inc: Extract<Incident, { kind: K }>) => Draft | null };
@@ -404,6 +425,51 @@ const builders: Builders = {
     };
   },
 
+  tipOff(state, inc) {
+    const i = live(state, inc.personIds[0]);
+    const pl = live(state, inc.personIds[1]);
+    const t = live(state, inc.personIds[2]);
+    if (!i || !pl || !t) return null;
+    const vsCeo = t.id === state.player.personId;
+    const prog = plotProgress(state, pl.id) ?? 0;
+    const stage = prog >= 75 ? 'close to making a move' : prog >= 40 ? 'courting allies' : 'still only whispering';
+    return {
+      kind: 'tipOff',
+      title: `${fullName(i)} warns you about ${fullName(pl)}`,
+      body: `${fullName(i)} (${titleOf(i)}) has come to you in confidence: ${fullName(pl)} (${titleOf(pl)}) is campaigning against ${vsCeo ? 'you' : `${fullName(t)} (${titleOf(t)})`}. ${capitalize(they(pl))} ${be(pl)} ${stage}.`,
+      subjectIds: [i.id, pl.id, t.id],
+      unitId: pl.unitId,
+      options: [
+        { id: 'note', label: 'Note it', hint: 'They go on your radar; nothing else happens' },
+        { id: 'reward', label: 'Thank them properly', hint: `Bonus of ${formatZuzu(Math.round(i.salary * TIPOFF_BONUS))}; they'll keep you informed` },
+        { id: 'watch', label: `Have Security watch ${fullName(pl)}`, hint: 'Sets the plot back; may expose a secret', attention: 1 },
+      ],
+    };
+  },
+
+  pitch(state, inc) {
+    const p = live(state, inc.personIds[0]);
+    const r = live(state, inc.personIds[1]);
+    if (!p || !r) return null;
+    const tag = getRelation(state, p.id, r.id)?.tag;
+    const bad = tag === 'rival' ? 'The two are rivals.' : tag === 'grudge' ? 'The two hold a grudge.' : 'The two have been at odds.';
+    const dirt = pitchSecret(r, inc.secretId);
+    return {
+      kind: 'pitch',
+      title: `${fullName(p)} wants your backing against ${fullName(r)}`,
+      body: `${fullName(p)} (${titleOf(p)}) wants you on ${pronoun(p, 'possessive')} side against ${fullName(r)} (${titleOf(r)}). ${bad}${dirt ? ` ${fullName(p)} says ${they(p)} can prove ${fullName(r)} is hiding something.` : ''}`,
+      subjectIds: [p.id, r.id],
+      unitId: p.unitId,
+      data: inc.secretId ? { secretId: inc.secretId } : undefined,
+      options: [
+        { id: 'neutral', label: 'Stay out of it', hint: `${fullName(p)} will be disappointed` },
+        { id: 'back', label: `Back ${fullName(p)}`, hint: `They're yours; ${fullName(r)} may find out` },
+        ...(dirt ? [{ id: 'dirt', label: `Take what ${fullName(p)} has on ${fullName(r)}`, hint: `Exposes a secret; ${fullName(p)} expects protection` }] : []),
+        { id: 'warn', label: `Warn ${fullName(r)}`, hint: `${fullName(r)} grows loyal; ${fullName(p)} will not forgive it` },
+      ],
+    };
+  },
+
   fixerFallout: (_state, inc) => ({
     kind: 'fixerFallout',
     title: 'Fixer job traced to us',
@@ -441,6 +507,11 @@ function buildMisconduct(state: GameState, inc: Extract<Incident, { kind: 'leak'
       { id: 'coverUp', label: 'Cover it up', hint: 'They owe you, but it becomes a secret of yours', attention: 1 },
     ],
   };
+}
+
+/** The rival's hidden secret a pitch offers, if it is still hidden. */
+function pitchSecret(rival: Person, secretId: string | null | undefined): Secret | null {
+  return (secretId && rival.secrets.find((x) => x.id === secretId && !x.revealed)) || null;
 }
 
 // --- vacant seat candidates
@@ -482,6 +553,182 @@ function backerOf(state: GameState, id: PersonId): string | null {
     if (op >= 30 && (!best || op > best.op)) best = { id: b, op };
   }
   return best ? fullName(person(state, best.id)) : null;
+}
+
+// ---------------------------------------------------------------- voices
+
+/** Who walks into the CEO's office with the matter, and what they say. */
+type Voice = (state: GameState, d: Draft) => { speaker: Person | null; lines: string[] } | null | undefined;
+
+const at = (state: GameState, d: Draft, i: number): Person | null => live(state, d.subjectIds[i]);
+const they = (p: Person) => pronoun(p, 'subject');
+const them = (p: Person) => pronoun(p, 'object');
+
+const voices: Partial<Record<InboxKind, Voice>> = {
+  raiseDemand: (state, d) => ({
+    speaker: at(state, d, 0),
+    lines: [
+      "I've looked at what people in my seat make across the street. I'm well under, and I'd like that fixed.",
+      `I've carried more than my share and my pay hasn't moved. I'm asking for ${pct(d.data?.ask ?? 0.1)}.`,
+      `${pct(d.data?.ask ?? 0.1)}. That's what it takes to bring me in line with the market.`,
+    ],
+  }),
+  promotionDemand: (state, d) => {
+    const p = at(state, d, 0);
+    const years = p ? Math.max(1, Math.round((state.month - p.hiredMonth) / 12)) : 2;
+    return {
+      speaker: p,
+      lines: [
+        `I've done this job for ${years} year${years === 1 ? '' : 's'}. I'm ready for more, and I'd like to hear when.`,
+        "I'm not asking for a favour. Look at my numbers and tell me what I'm still waiting for.",
+        "People I trained are managing teams now. I'd like to know where I stand.",
+      ],
+    };
+  },
+  seatVacancy: (state, d) => {
+    const u = d.unitId ? state.units[d.unitId] : undefined;
+    return {
+      speaker: chiefOfStaff(state),
+      lines: [
+        `${u?.name ?? 'That unit'} has nobody at the top. The floor is filling the gap with rumours; you should pick someone.`,
+        `Three people think they should run ${u?.name ?? 'it'}. Each of them has someone lobbying for them.`,
+      ],
+    };
+  },
+  feud: (state, d) => {
+    const b = at(state, d, 1);
+    if (!b) return null;
+    return {
+      speaker: at(state, d, 0),
+      lines: [
+        `Either ${fullName(b)} goes or I stop pretending to work with ${them(b)}.`,
+        `I can't get anything done while ${fullName(b)} undermines every decision I make.`,
+        `${fullName(b)} has made it personal. I'm done being the adult in the room.`,
+      ],
+    };
+  },
+  scheme: (state, d) => {
+    const s = at(state, d, 0);
+    const t = at(state, d, 1);
+    if (!s || !t) return null;
+    if (t.id === state.player.personId) {
+      return {
+        speaker: chiefOfStaff(state),
+        lines: [
+          `You should hear this from me first: ${fullName(s)} is moving against you. I don't know how far it has gone.`,
+          `${fullName(s)} has been having very friendly lunches with directors. Your name comes up.`,
+        ],
+      };
+    }
+    return {
+      speaker: t,
+      lines: [
+        `${fullName(s)} is working on my boss behind my back. I'm not imagining it.`,
+        `I know what ${fullName(s)} is up to. I'd like you to know that I know.`,
+      ],
+    };
+  },
+  leak: (state, d) => {
+    const p = at(state, d, 0);
+    return p && {
+      speaker: functionHead(state, 'security'),
+      lines: [`We traced the leak. It's ${fullName(p)}. Tell me how you want it handled.`, `The documents came from ${fullName(p)}'s terminal. There's no doubt.`],
+    };
+  },
+  embezzlement: (state, d) => {
+    const p = at(state, d, 0);
+    return p && {
+      speaker: functionHead(state, 'finance') ?? functionHead(state, 'security'),
+      lines: [`The numbers don't add up, and the trail ends at ${fullName(p)}.`, `Audit flagged it twice. It's ${fullName(p)}, and it's been going on a while.`],
+    };
+  },
+  scandal: (state, d) => {
+    const p = at(state, d, 0);
+    return p && {
+      speaker: functionHead(state, 'legal') ?? chiefOfStaff(state),
+      lines: [`The ${p.lastName} story will be in the feeds by morning. We need a line.`, `Everyone on the floor is talking about ${fullName(p)}. Decide before the press does.`],
+    };
+  },
+  breakthrough: (state, d) => {
+    const p = at(state, d, 0);
+    if (!p) return null;
+    const bossId = bossOf(state, p.id);
+    const boss = bossId && bossId !== state.player.personId ? live(state, bossId) : null;
+    return {
+      speaker: boss ?? p,
+      lines: boss
+        ? [`You should know what ${fullName(p)} just did. ${capitalize(they(p))} ${be(p)} the real thing.`, `${fullName(p)} solved something the rest of us had given up on. Don't let a rival poach ${them(p)}.`]
+        : ["I think I've cracked it. I wanted you to hear it from me.", "It works. I've checked it three times. It works."],
+    };
+  },
+  resignationThreat: (state, d) => ({
+    speaker: at(state, d, 0),
+    lines: ["Something changes, or I walk. I mean it.", "I've turned down offers because I thought this place was going somewhere. I'm not sure any more.", "I'm tired. Give me a reason to stay or I'm gone."],
+  }),
+  poachOffer: (state, d) => ({
+    speaker: at(state, d, 0),
+    lines: [`They're offering ${formatZuzu(d.data?.offer ?? 0)} a year. I'd rather stay, but give me a reason.`, "A rival made me an offer. I haven't said yes. Yet."],
+  }),
+  complaint: (state, d) => {
+    const m = at(state, d, 1);
+    return m && {
+      speaker: at(state, d, 0),
+      lines: [`${fullName(m)} treats us like furniture. I want it on the record.`, `I tried going through ${fullName(m)}. That's the problem.`],
+    };
+  },
+  cliqueFormed: (state, d) => {
+    const c = d.data?.cliqueId ? state.cliques[d.data.cliqueId] : undefined;
+    const l = at(state, d, 0);
+    return l && c && {
+      speaker: chiefOfStaff(state),
+      lines: [`${fullName(l)} has a following now. They call themselves ${c.name}.`, `${c.name} meets after hours. ${fullName(l)} runs it, and it's growing.`],
+    };
+  },
+  managerFiring: (state, d) => {
+    const m = at(state, d, 0);
+    const f = d.subjectIds[1] ? state.people[d.subjectIds[1]] : undefined;
+    return m && f ? {
+      speaker: f,
+      lines: [`${fullName(m)} fired me. I'm asking you to look at it yourself. That's all.`, `I was let go on ${fullName(m)}'s word alone. I'd like a hearing.`],
+    } : null;
+  },
+  fixerFallout: (state) => ({
+    speaker: functionHead(state, 'legal') ?? chiefOfStaff(state),
+    lines: ["The fixer job didn't stay quiet. Someone has our name.", "A journalist called me about that job. How much do we want this to go away?"],
+  }),
+  talentWave: (state) => ({
+    speaker: chiefOfStaff(state),
+    lines: ["The field is thinning and awakened people are walking in off the street. We could sign one before the rivals do."],
+  }),
+  tipOff: (state, d) => {
+    const pl = at(state, d, 1);
+    const t = at(state, d, 2);
+    if (!pl || !t) return null;
+    return {
+      speaker: at(state, d, 0),
+      lines: t.id === state.player.personId
+        ? [`I shouldn't be telling you this. ${fullName(pl)} has been meeting directors, and it's about you.`, `${fullName(pl)} is counting votes on the board. Yours, specifically.`]
+        : [`${fullName(pl)} is building a case against ${fullName(t)}. People are being lined up.`, `Watch ${fullName(pl)}. ${capitalize(they(pl))} want${pl.pronouns === 'they' ? '' : 's'} ${fullName(t)}'s seat and ${be(pl)} not being subtle.`],
+    };
+  },
+  pitch: (state, d) => {
+    const r = at(state, d, 1);
+    const p = at(state, d, 0);
+    if (!r || !p) return null;
+    const where = p.unitId ? state.units[p.unitId]?.name ?? 'here' : 'here';
+    return {
+      speaker: p,
+      lines: d.data?.secretId
+        ? [`I have something on ${fullName(r)} you'll want. I'm offering it to you first.`, `${fullName(r)} isn't clean. I can prove it, if you're on my side.`]
+        : [`Let's be honest about ${fullName(r)}: ${they(r)} ${be(r)} holding things back. Back me, and you'll have a friend in ${where}.`, `It's ${fullName(r)} or me. I'd rather you chose before someone else does.`],
+    };
+  },
+};
+
+function voiceFor(state: GameState, d: Draft): Pick<InboxItem, 'speakerId' | 'quote'> {
+  const v = voices[d.kind]?.(state, d);
+  if (!v?.speaker || (!isActive(v.speaker) && d.kind !== 'managerFiring')) return { speakerId: null };
+  return { speakerId: v.speaker.id, quote: speak(v.speaker, state.month, d.kind, v.lines) };
 }
 
 // ---------------------------------------------------------------- generateEvents
@@ -553,6 +800,7 @@ function createItem(state: GameState, d: Draft): InboxItem {
     body: d.body,
     subjectIds: d.subjectIds,
     unitId: d.unitId,
+    ...voiceFor(state, d),
     options: d.options,
     resolution: null,
     expiresMonth: state.month + (d.expiryMonths ?? EXPIRY_MONTHS),
@@ -565,6 +813,17 @@ function createItem(state: GameState, d: Draft): InboxItem {
   if (main && reason) {
     main.attentionUntil = state.month + ATTENTION_MONTHS;
     main.attentionReason = reason;
+  }
+  // Once a plot has reached the CEO's desk, the CEO knows about it.
+  if (d.kind === 'scheme' || d.kind === 'tipOff') {
+    const plotterId = d.kind === 'scheme' ? d.subjectIds[0] : d.subjectIds[1];
+    const plot = plotterId ? state.plots[plotterId] : undefined;
+    if (plot) plot.known = true;
+    const plotter = plotterId ? state.people[plotterId] : undefined;
+    if (plotter && !hasAttention(state, plotter)) {
+      plotter.attentionUntil = state.month + ATTENTION_MONTHS;
+      plotter.attentionReason = 'Suspected of plotting';
+    }
   }
   return item;
 }
@@ -701,6 +960,38 @@ function forPair(fn: (state: GameState, item: InboxItem, opt: string, a: Person,
     const b = live(state, item.subjectIds[1]);
     return a && b ? fn(state, item, opt, a, b) : gone();
   };
+}
+
+/** Security watches a plotter: the campaign loses ground, the worst hidden secret may come out and the faction is on the record. */
+function watchPlotter(state: GameState, s: Person, t: Person | null, lifeText: string): ActionResult {
+  s.investigatedMonth = state.month;
+  // Surveillance forces a plotter to lie low.
+  const slowed = setbackPlot(state, s.id, PLOT_WATCH_SETBACK);
+  const found = s.secrets.filter((x) => !x.revealed).sort((x, y) => y.severity - x.severity)[0];
+  const clique = s.cliqueId ? state.cliques[s.cliqueId] : undefined;
+  if (clique) clique.known = true;
+  const stall = slowed ? ' The campaign stalls under watch.' : '';
+  if (found) {
+    found.revealed = true;
+    addLifeEvent(state, s.id, 'investigated', lifeText, -2, true);
+    return ok(`Security finds that ${fullName(s)} is hiding: ${found.description}${stall}`);
+  }
+  addLifeEvent(state, s.id, 'investigated', lifeText, -1, true);
+  const against = t ? (t.id === state.player.personId ? 'you' : fullName(t)) : 'its target';
+  return ok(`Security confirms the scheme against ${against} but finds nothing else on ${fullName(s)}.${stall}`);
+}
+
+/** Records the pitcher's claim on the CEO's protection, unless one is already open. */
+function promiseProtection(state: GameState, p: Person, rival: Person): void {
+  if (state.promises.some((x) => x.personId === p.id && x.kind === 'protection' && x.state === 'open')) return;
+  makePromise(state, p.id, 'protection', 6, `Backing against ${fullName(rival)}.`);
+}
+
+/** Marks two people as rivals, unless either already has a tag for the other. */
+function makeRivals(state: GameState, a: Person, b: Person): void {
+  if (getRelation(state, a.id, b.id)?.tag || getRelation(state, b.id, a.id)?.tag) return;
+  setTag(state, a.id, b.id, 'rival');
+  setTag(state, b.id, a.id, 'rival');
 }
 
 const handlers: Record<InboxKind, Handler> = {
@@ -848,21 +1139,8 @@ const handlers: Record<InboxKind, Handler> = {
           return ok(`You warn ${fullName(t)}. ${fullName(s)} learns of it and the two are now open enemies.`);
         }
         return ok(`You warn ${fullName(t)} quietly. ${capitalize(pronoun(t, 'subject'))} ${be(t)} on guard.`);
-      case 'investigate': {
-        s.investigatedMonth = state.month;
-        // Surveillance forces a plotter to lie low.
-        const slowed = setbackPlot(state, s.id, PLOT_WATCH_SETBACK);
-        const found = s.secrets.filter((x) => !x.revealed).sort((x, y) => y.severity - x.severity)[0];
-        const clique = s.cliqueId ? state.cliques[s.cliqueId] : undefined;
-        if (clique) clique.known = true;
-        if (found) {
-          found.revealed = true;
-          addLifeEvent(state, s.id, 'investigated', 'Investigated by Security over a scheme.', -2, true);
-          return ok(`Security finds that ${fullName(s)} is hiding: ${found.description}${slowed ? ' The campaign stalls under watch.' : ''}`);
-        }
-        addLifeEvent(state, s.id, 'investigated', 'Investigated by Security over a scheme.', -1, true);
-        return ok(`Security confirms the scheme against ${fullName(t)} but finds nothing else on ${fullName(s)}.${slowed ? ' The campaign stalls under watch.' : ''}`);
-      }
+      case 'investigate':
+        return watchPlotter(state, s, t, 'Investigated by Security over a scheme.');
       case 'confront': {
         const leverage = s.secrets.some((x) => x.revealed && x.severity >= 2);
         if (leverage) {
@@ -887,6 +1165,88 @@ const handlers: Record<InboxKind, Handler> = {
       default:
         adjustOpinion(state, s.id, t.id, -5);
         return ok(`You let ${fullName(s)} and ${fullName(t)} work it out.`);
+    }
+  }),
+
+  tipOff(state, item, opt) {
+    const i = live(state, item.subjectIds[0]);
+    const pl = live(state, item.subjectIds[1]);
+    if (!i || !pl) return gone();
+    const ceoId = state.player.personId;
+    switch (opt) {
+      case 'reward': {
+        const bonus = Math.round(i.salary * TIPOFF_BONUS);
+        state.company.cash -= bonus;
+        adjustLoyalty(state, i.id, 8);
+        adjustOpinion(state, i.id, ceoId, 8);
+        adjustSatisfaction(state, i.id, 4);
+        addLifeEvent(state, i.id, 'rewarded', `Thanked by the CEO with a ${formatZuzu(bonus)} bonus for a warning.`, 2, true);
+        return ok(`${fullName(i)} takes ${formatZuzu(bonus)} and will keep you informed. ${fullName(pl)} is on your radar.`);
+      }
+      case 'watch':
+        return watchPlotter(state, pl, live(state, item.subjectIds[2]), 'Investigated by Security after a tip-off.');
+      default:
+        adjustOpinion(state, i.id, ceoId, 2);
+        return ok(`You note ${fullName(i)}'s warning. ${fullName(pl)} is on your radar.`);
+    }
+  },
+
+  pitch: forPair((state, item, opt, p, r) => {
+    const ceoId = state.player.personId;
+    switch (opt) {
+      case 'back': {
+        adjustLoyalty(state, p.id, 10);
+        adjustOpinion(state, p.id, ceoId, 10);
+        promiseProtection(state, p, r);
+        const plot = state.plots[p.id];
+        if (plot && plot.targetId === r.id) plot.progress = Math.min(100, plot.progress + PITCH_BACK_BOOST);
+        else {
+          const boss = bossOf(state, r.id);
+          if (boss && boss !== ceoId) {
+            adjustOpinion(state, boss, r.id, -8);
+            adjustOpinion(state, boss, p.id, 6);
+          }
+        }
+        addLifeEvent(state, p.id, 'backed', `Backed by the CEO against ${fullName(r)}.`, 3, true);
+        addLifeEvent(state, r.id, 'undercut', `Lost ground when the CEO backed ${fullName(p)} against ${pronoun(r, 'object')}.`, -2, true);
+        const gossip = p.traits.includes('gossip') || r.traits.includes('gossip');
+        if (chance(state, PITCH_LEAK_CHANCE + (gossip ? PITCH_LEAK_GOSSIP : 0))) {
+          adjustOpinion(state, r.id, ceoId, -15);
+          adjustLoyalty(state, r.id, -8);
+          makeRivals(state, p, r);
+          return ok(`You back ${fullName(p)}. Word gets to ${fullName(r)}, who ${verb(r, 'take')} it as a declaration of war.`);
+        }
+        return ok(`You back ${fullName(p)}. ${fullName(r)} does not know it yet.`);
+      }
+      case 'dirt': {
+        const sec = pitchSecret(r, item.data.secretId);
+        if (!sec) return fail('The secret is already out; there is nothing left to take.');
+        sec.revealed = true;
+        r.attentionUntil = state.month + ATTENTION_MONTHS;
+        r.attentionReason = 'Exposed';
+        adjustLoyalty(state, p.id, 4);
+        promiseProtection(state, p, r);
+        addLifeEvent(state, p.id, 'backed', `Handed the CEO what ${pronoun(p, 'subject')} knew about ${fullName(r)}.`, 2, true);
+        addLifeEvent(state, r.id, 'exposed', `Exposed to the CEO by ${fullName(p)}: ${sec.description}`, -4, true);
+        return ok(`${fullName(p)} hands over the file. ${fullName(r)} is hiding: ${sec.description} ${capitalize(pronoun(p, 'subject'))} will expect protection.`);
+      }
+      case 'warn': {
+        adjustLoyalty(state, r.id, 8);
+        adjustOpinion(state, r.id, ceoId, 8);
+        adjustOpinion(state, r.id, p.id, -20);
+        makeRivals(state, p, r);
+        adjustOpinion(state, p.id, ceoId, -15);
+        adjustLoyalty(state, p.id, -10);
+        const plot = state.plots[p.id];
+        const hit = plot && plot.targetId === r.id && setbackPlot(state, p.id, PITCH_WARN_SETBACK);
+        addLifeEvent(state, r.id, 'warned', `Warned by the CEO that ${fullName(p)} was angling against ${pronoun(r, 'object')}.`, 2, true);
+        addLifeEvent(state, p.id, 'pitchBurned', `Asked the CEO for backing against ${fullName(r)} and was turned on.`, -3, true);
+        return ok(`You warn ${fullName(r)}. ${fullName(p)} learns who talked and is furious.${hit ? ` ${capitalize(pronoun(p, 'possessive'))} campaign loses ground.` : ''}`);
+      }
+      default:
+        adjustSatisfaction(state, p.id, -3);
+        adjustOpinion(state, p.id, ceoId, -3);
+        return ok(`You stay out of it. ${fullName(p)} had hoped for more.`);
     }
   }),
 

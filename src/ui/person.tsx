@@ -1,12 +1,13 @@
 import { useState } from 'preact/hooks';
 import type { Person, PersonId, PromiseKind, Skills } from '../sim/types';
-import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead } from '../sim/org';
+import { chainOfCommand, fullName, hasAttention, formatZuzu, monthLabel, bossOf, isLead, isDirector } from '../sim/org';
 import {
   demote, fire, grantOptions, investigatePerson, meet, promote, reassign, setSalary, skipLevelInfo,
   type MeetingApproach, type SkipLevelInfo,
 } from '../sim/actions';
 import { ATTENTION_COST, attentionCost } from '../sim/attention';
-import { Bar, Btn, ConfirmBtn, DivBar, PersonChip, PersonLink, Seg, Sheet, Stepper, intelVisible, levelClass, signed, unitLabel } from './common';
+import { Bar, Btn, ConfirmBtn, DivBar, PersonChip, PersonLink, Seg, Sheet, Stepper, TRAIT_TEXT, intelVisible, levelClass, loyaltyWord, plotStage, signed, stanceColor, stanceWord, unitLabel } from './common';
+import { Portrait } from './portrait';
 import { UnitPicker } from './pickers';
 import { closeSheet, game, goOrg, openUnit, run } from './store';
 
@@ -63,14 +64,36 @@ export function PersonSheet({ id }: { id: PersonId }) {
   const tog = (m: Mode) => setMode(mode === m ? null : m);
   const salStep = Math.max(1000, Math.round(p.salary * 0.05 / 1000) * 1000);
   const unit = p.unitId ? g.units[p.unitId] : null;
+  const showStance = active && !isPlayer && (direct || intel || isDirector(g, p));
+  const stance = showStance ? { opinion: toYou?.opinion ?? 0 } : null;
+  const plot = g.plots[id];
+  const plotAgainst = plot?.known && g.people[plot.targetId] ? plot : null;
+  const plotTarget = plotAgainst ? (plotAgainst.targetId === g.player.personId ? 'you' : fullName(g.people[plotAgainst.targetId])) : '';
+  const plotsOnThem = Object.entries(g.plots).filter(([pid, pl]) => pl.known && pl.targetId === id && g.people[pid] && g.people[pid].status === 'active');
 
   return (
     <Sheet title={fullName(p)}>
-      <div class="small dim">{p.title}{p.status !== 'active' && <> · <span class="red">{p.status}</span></>}</div>
-      <div class="small dim" style={{ marginTop: '2px' }}>
-        {p.pronouns} · age {p.age} · {p.heritage} · hired {monthLabel(p.hiredMonth)}
-        {unit && <> · <a class="link" onClick={() => goOrg(unit.id)}>{unitLabel(g, unit.id)}</a></>}
+      <div class="phead">
+        <Portrait id={id} size={72} ring={stance ? stanceColor(stance.opinion) : undefined} />
+        <div class="grow">
+          <div class="pname">{fullName(p)}</div>
+          <div class="small">{p.title}{p.status !== 'active' && <> · <span class="red">{p.status}</span></>}</div>
+          {unit && <div class="small"><a class="link" onClick={() => goOrg(unit.id)}>{unitLabel(g, unit.id)}</a></div>}
+          <div class="small dim">{p.pronouns} · age {p.age} · {p.heritage} · hired {monthLabel(p.hiredMonth)}</div>
+        </div>
       </div>
+      {stance && (
+        <div class="seeyou">
+          <span class="label">How they see you</span>
+          <div><b style={{ color: stanceColor(stance.opinion) }}>{stanceWord(stance.opinion)}</b> toward you · <b>{loyaltyWord(p.loyalty)}</b> loyalty</div>
+        </div>
+      )}
+      {plotAgainst && <div class="redbox" style={{ marginTop: '8px' }}>Campaigning against {plotTarget}: {plotStage(plotAgainst.progress)}.</div>}
+      {plotsOnThem.map(([pid, pl]) => (
+        <div key={pid} class="redbox" style={{ marginTop: '8px' }}>
+          <b>{g.people[pid] ? fullName(g.people[pid]) : 'Someone'}</b> is campaigning against {p.firstName}: {plotStage(pl.progress)}.
+        </div>
+      ))}
       {!active && p.fate && <div class="warnbox" style={{ marginTop: '8px' }}>{p.fate}</div>}
       {hasAttention(g, p) && <div class="warnbox" style={{ marginTop: '8px' }}>On your radar: {p.attentionReason ?? 'noteworthy'} (until {monthLabel(p.attentionUntil!)})</div>}
       {chain.length > 0 && (
@@ -85,18 +108,7 @@ export function PersonSheet({ id }: { id: PersonId }) {
           <h2>Actions</h2>
           <div class="stack">
             <SkipWarn id={id} />
-            <div class="grid2">
-              <Btn onClick={() => tog('meet')} cost={ATTENTION_COST.meet}>Meet</Btn>
-              <Btn onClick={() => tog('promote')} cost={ATTENTION_COST.promote}>Promote</Btn>
-              <Btn onClick={() => run((s) => demote(s, id))} cost={ATTENTION_COST.demote} disabled={!leads} title={leads ? undefined : 'Only leads can be demoted'}>Demote</Btn>
-              <Btn onClick={() => tog('reassign')} cost={ATTENTION_COST.reassign} disabled={leads} title={leads ? 'Leads cannot be reassigned: demote or promote instead' : undefined}>Reassign</Btn>
-              <Btn onClick={() => tog('salary')}>Salary</Btn>
-              <Btn onClick={() => tog('options')}>Options</Btn>
-              <Btn onClick={() => run((s) => investigatePerson(s, id))} cost={ATTENTION_COST.investigatePerson}>Investigate</Btn>
-              <ConfirmBtn label="Fire" cls="danger" cost={attentionCost(game(), 'fire', id)} onClick={() => run((s) => fire(s, id))} />
-            </div>
-
-            <div class="hint">{leads ? 'Leads can be promoted, demoted or fired, not reassigned.' : 'Reassign moves them as a member; Promote makes them a lead.'}</div>
+            <Btn cls="block primary meetbtn" onClick={() => tog('meet')} cost={ATTENTION_COST.meet}>Meet {p.firstName}</Btn>
             {mode === 'meet' && (
               <div class="card stack">
                 <Seg value={approach} onChange={setApproach} options={[['rapport', 'Rapport'], ['promise', 'Promise'], ['threaten', 'Threaten'], ['probe', 'Probe']]} />
@@ -119,6 +131,18 @@ export function PersonSheet({ id }: { id: PersonId }) {
                 </Btn>
               </div>
             )}
+            <div class="label" style={{ marginTop: '12px' }}>Other actions</div>
+            <div class="grid2">
+              <Btn onClick={() => tog('promote')} cost={ATTENTION_COST.promote}>Promote</Btn>
+              <Btn onClick={() => run((s) => demote(s, id))} cost={ATTENTION_COST.demote} disabled={!leads} title={leads ? undefined : 'Only leads can be demoted'}>Demote</Btn>
+              <Btn onClick={() => tog('reassign')} cost={ATTENTION_COST.reassign} disabled={leads} title={leads ? 'Leads cannot be reassigned: demote or promote instead' : undefined}>Reassign</Btn>
+              <Btn onClick={() => tog('salary')}>Salary</Btn>
+              <Btn onClick={() => tog('options')}>Options</Btn>
+              <Btn onClick={() => run((s) => investigatePerson(s, id))} cost={ATTENTION_COST.investigatePerson}>Investigate</Btn>
+              <ConfirmBtn label="Fire" cls="danger" cost={attentionCost(game(), 'fire', id)} onClick={() => run((s) => fire(s, id))} />
+            </div>
+
+            <div class="hint">{leads ? 'Leads can be promoted, demoted or fired, not reassigned.' : 'Reassign moves them as a member; Promote makes them a lead.'}</div>
             {mode === 'promote' && (
               <div class="card">
                 <div class="label" style={{ marginBottom: '6px' }}>Promote to lead of…</div>
@@ -164,10 +188,12 @@ export function PersonSheet({ id }: { id: PersonId }) {
           <span class="dim">{l}</span><Bar value={p.skills[k]} cls={p.skills[k] < 35 ? 'a' : ''} /><span class="mono">{Math.round(p.skills[k])}</span>
         </div>
       ))}
-      <div style={{ marginTop: '8px' }}>
-        {p.traits.map((t) => <span key={t} class="tag cyan" style={{ marginRight: '4px' }}>{t}</span>)}
-        {intel && <span class="tag" title="ambition / greed">amb {Math.round(p.ambition)} · greed {Math.round(p.greed)}</span>}
+      <h2>Character</h2>
+      <div class="traits">
+        {p.traits.map((t) => <div key={t}><span class="tag cyan">{t}</span><span class="small dim">{TRAIT_TEXT[t]}</span></div>)}
+        {p.traits.length === 0 && <span class="small dim">No strong traits.</span>}
       </div>
+      {intel && <div style={{ marginTop: '6px' }}><span class="tag" title="ambition / greed">amb {Math.round(p.ambition)} · greed {Math.round(p.greed)}</span></div>}
 
       {promises.length > 0 && (
         <>

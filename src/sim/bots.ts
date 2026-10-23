@@ -114,6 +114,13 @@ function chooseOption(state: GameState, item: InboxItem): string {
       if (!s0) return 'letGo';
       if (s0.performance < 55 && s0.role === 'worker') return 'letGo';
       return s0.loyalty >= 70 && attn >= 1 ? 'appeal' : 'counter';
+    case 'tipOff': {
+      const plotter = subj[1];
+      const dangerous = !!plotter && (plotter.role === 'officer' || subj[2]?.id === state.player.personId);
+      return attn >= 1 && dangerous && has('watch') ? 'watch' : 'note';
+    }
+    case 'pitch':
+      return 'neutral';
     case 'complaint':
       return 'file';
     case 'cliqueFormed':

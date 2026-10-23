@@ -1,15 +1,16 @@
 import { useState } from 'preact/hooks';
 import type { FunctionKind, OrgUnit, Person, UnitKind } from '../sim/types';
 import { explainUnitOutput } from '../sim/economy';
-import { fullName, isActive, peopleUnder, unitAncestry, formatZuzu } from '../sim/org';
+import { bossOf, fullName, isActive, peopleUnder, unitAncestry, formatZuzu } from '../sim/org';
 import {
   createUnit, dissolveUnit, hire, investigateUnit, mergeUnits, moveUnit, setBudget, type HireTier,
 } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
-import { Bar, Btn, ConfirmBtn, KIND_LABEL, PersonLink, Seg, Sheet, Stepper, levelClass, personFlag, unitFlag, unitIntel } from './common';
+import { Bar, Btn, ConfirmBtn, KIND_LABEL, PersonLink, Seg, Sheet, Stepper, levelClass, personFlag, stanceColor, stanceWord, unitFlag, unitIntel } from './common';
+import { Portrait } from './portrait';
+import { PlayersView } from './players';
 import { ALLOWED_PARENTS, UnitPicker, subtreeIds } from './pickers';
-import { closeSheet, game, openPerson, openUnit, run, setOrgUnit } from './store';
-import { S } from './store';
+import { closeSheet, game, openPerson, openUnit, run, setOrgMode, setOrgUnit, showUnit, S, type OrgMode } from './store';
 
 function PersonRow({ p }: { p: Person }) {
   const g = game();
@@ -17,6 +18,7 @@ function PersonRow({ p }: { p: Person }) {
   return (
     <button class="item" onClick={() => openPerson(p.id)}>
       <span class={`mark m${f}`} />
+      <Portrait id={p.id} size={32} />
       <div class="grow">
         <div class="t">{fullName(p)}</div>
         <div class="s">{p.title}</div>
@@ -37,6 +39,7 @@ function UnitRow({ u }: { u: OrgUnit }) {
   return (
     <button class="item" onClick={() => setOrgUnit(u.id)}>
       <span class={`mark m${f}`} />
+      <Portrait id={u.leadId} size={32} />
       <div class="grow">
         <div class="t">{u.name}</div>
         <div class="s">{KIND_LABEL[u.kind]} · {lead ? fullName(lead) : <span class="red">vacant</span>} · {hc} ppl</div>
@@ -51,7 +54,7 @@ function UnitRow({ u }: { u: OrgUnit }) {
   );
 }
 
-export function OrgView() {
+function UnitsView() {
   const g = game();
   const [all, setAll] = useState(false);
   const id = S.orgUnit && g.units[S.orgUnit] ? S.orgUnit : g.rootUnitId;
@@ -113,6 +116,112 @@ export function OrgView() {
         </>
       )}
       {u.childIds.length === 0 && members.length === 0 && <div class="hint">Nobody here besides the lead.</div>}
+    </div>
+  );
+}
+
+// --- Chart ----------------------------------------------------------------------
+
+/** Folded/unfolded overrides; kept across tab switches. Default: the root and the C-suite are open. */
+const chartToggle = new Map<string, boolean>();
+const chartOpen = (u: OrgUnit) => chartToggle.get(u.id) ?? (u.kind === 'executive' || u.kind === 'function');
+
+function headcountOf(g: ReturnType<typeof game>, id: string): number {
+  return peopleUnder(g, id).filter((x) => g.people[x] && isActive(g.people[x])).length;
+}
+
+function StaffNode({ id }: { id: string }) {
+  const g = game();
+  const p = g.people[id];
+  const op = g.relations[id]?.[g.player.personId]?.opinion ?? 0;
+  return (
+    <li class="cli slim">
+      <div class="cn slim f0">
+        <button class="cn-face" onClick={() => openPerson(id)} aria-label={fullName(p)}>
+          <Portrait id={id} size={32} dot={stanceColor(op)} />
+        </button>
+        <div class="cn-body" onClick={() => openPerson(id)}>
+          <div class="t">{fullName(p)}</div>
+          <div class="s">{p.title} · your office</div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function UnitNode({ u, rerender }: { u: OrgUnit; rerender: () => void }) {
+  const g = game();
+  const me = g.player.personId;
+  const root = u.kind === 'executive';
+  const lead = u.leadId ? g.people[u.leadId] : null;
+  const open = chartOpen(u);
+  const staff = root ? u.memberIds.filter((m) => g.people[m] && isActive(g.people[m])) : [];
+  const kids = u.childIds.filter((c) => g.units[c]);
+  const foldable = kids.length > 0 || staff.length > 0;
+  const hc = headcountOf(g, u.id);
+  const direct = !!lead && !root && bossOf(g, lead.id) === me;
+  const op = direct ? g.relations[lead!.id]?.[me]?.opinion ?? 0 : 0;
+  const flag = unitFlag(g, u);
+  const toggle = () => {
+    if (!foldable) return showUnit(u.id);
+    chartToggle.set(u.id, !open);
+    rerender();
+  };
+  return (
+    <li class="cli">
+      <div class={`cn f${flag}`}>
+        <button class="cn-face" onClick={() => (lead ? openPerson(lead.id) : showUnit(u.id))} aria-label={lead ? fullName(lead) : 'Vacant seat'}>
+          <Portrait id={lead?.id} size={32} dot={direct ? stanceColor(op) : undefined} />
+        </button>
+        <div class="cn-body" onClick={toggle}>
+          <div class="t">{root ? g.company.name : u.name}</div>
+          <div class="s">
+            {lead ? (
+              <a class="cn-lead" onClick={(e) => { e.stopPropagation(); openPerson(lead.id); }}>{root ? `${fullName(lead)} (you)` : fullName(lead)}</a>
+            ) : <span class="red">Vacant</span>}
+            {direct && <span style={{ color: stanceColor(op) }}> · {stanceWord(op).toLowerCase()}</span>}
+          </div>
+          <div class="s2">{root ? 'CEO' : KIND_LABEL[u.kind]} · {hc} {kids.length || root ? 'people' : 'staff'}</div>
+        </div>
+        {foldable && <span class="cn-chev" onClick={toggle}>{open ? '▾' : '▸'}</span>}
+        <button class="cn-go" onClick={() => showUnit(u.id)} aria-label={`Open ${u.name} in Units`}>›</button>
+      </div>
+      {foldable && open && (
+        <ul>
+          {staff.map((m) => <StaffNode key={m} id={m} />)}
+          {kids.map((c) => <UnitNode key={c} u={g.units[c]} rerender={rerender} />)}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function OrgChart() {
+  const g = game();
+  const [, setN] = useState(0);
+  const rerender = () => setN((n) => n + 1);
+  const ops = Object.values(g.units).find((x) => x.functionKind === 'operations');
+  const coo = ops?.leadId ? g.people[ops.leadId] : null;
+  return (
+    <div>
+      <div class="chartkey">
+        Officers report to you.{ops && <> Divisions report to the COO{coo ? <> (<a class="link" onClick={() => openPerson(coo.id)}>{fullName(coo)}</a>)</> : ''}.</>}
+      </div>
+      <div class="hint" style={{ marginBottom: '8px' }}>Dot on a face: how they see you. Coloured edge: unit health. Tap a row to fold it; › opens the unit.</div>
+      <ul class="ctree top"><UnitNode u={g.units[g.rootUnitId]} rerender={rerender} /></ul>
+    </div>
+  );
+}
+
+export function OrgView() {
+  return (
+    <div>
+      <div style={{ margin: '10px 0 2px' }}>
+        <Seg<OrgMode> value={S.orgMode} onChange={setOrgMode} options={[['chart', 'Chart'], ['players', 'Players'], ['units', 'Units']]} />
+      </div>
+      {S.orgMode === 'chart' && <OrgChart />}
+      {S.orgMode === 'players' && <PlayersView />}
+      {S.orgMode === 'units' && <UnitsView />}
     </div>
   );
 }

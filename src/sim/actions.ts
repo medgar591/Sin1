@@ -50,6 +50,18 @@ import { setbackPlot } from './plots';
 import { PROMISE_LABEL, PROMISE_MAX_MONTHS, makePromise } from './promises';
 import { attentionCost, trySpend, type AttentionAction } from './attention';
 import { ripple, sponsorsOf } from './ties';
+import {
+  DIRECTOR_PERSUADED,
+  PROBE_CLOSED,
+  PROBE_TALKED,
+  PROMISE_REPLY,
+  RAPPORT_GUARDED,
+  RAPPORT_WARM,
+  THREAT_CALM,
+  THREAT_DEFIANT,
+  reply,
+  variant,
+} from './voice';
 import { capitalize, clamp, fail, ok, roundTo, sum } from './util';
 
 // ---- Tuning ----
@@ -116,6 +128,11 @@ function staffTarget(state: GameState, id: PersonId): Person | ActionResult {
   return p;
 }
 const isFail = (x: Person | ActionResult): x is ActionResult => 'ok' in x;
+
+/** A successful result with the person's reply attached, for the UI to play as a scene. */
+function withScene(result: ActionResult, speaker: Person, line: string): ActionResult {
+  return { ...result, scene: { speakerId: speaker.id, line } };
+}
 
 /** Leads from this unit (or its parent) up to the root, excluding the player; immediate boss first. */
 function leadsFromUnit(state: GameState, unitId: UnitId, includeOwn: boolean): PersonId[] {
@@ -699,6 +716,59 @@ function rapportMod(p: Person): number {
   return m;
 }
 
+/** Months a suspected plotter stays on the CEO's radar after someone talks. */
+const GOSSIP_ATTENTION_MONTHS = 3;
+
+/** Whether `other` is close enough to `p` for p to know what they are up to: same unit, same chain of command, or acquainted. */
+function nearTo(state: GameState, p: Person, other: Person): boolean {
+  if (p.unitId !== null && other.unitId === p.unitId) return true;
+  if (chainOfCommand(state, p.id).includes(other.id) || chainOfCommand(state, other.id).includes(p.id)) return true;
+  return !!state.relations[p.id]?.[other.id];
+}
+
+/**
+ * What a talkative person lets slip about a third party: first any plot they
+ * are close to (the CEO now knows of it and the plotter is on the radar), else
+ * a secret of someone they are feuding with. Deterministic: lowest id first,
+ * no RNG. Returns the clause to add to the result, or null.
+ */
+function probeGossip(state: GameState, p: Person): string | null {
+  // Gossips always talk; most others do about two times in three.
+  if (!p.traits.includes('gossip') && !variant([true, true, false], p.id, state.month, 'gossip')) return null;
+  const me = state.player.personId;
+
+  const plotterIds = Object.keys(state.plots).sort();
+  for (const plotterId of plotterIds) {
+    const plot = state.plots[plotterId];
+    const plotter = state.people[plotterId];
+    const target = state.people[plot.targetId];
+    if (plot.known || plotterId === p.id || !plotter || !target || !isActive(plotter) || !isActive(target)) continue;
+    const involved = p.id === target.id || nearTo(state, p, plotter) || (target.id !== me && nearTo(state, p, target));
+    if (!involved) continue;
+    plot.known = true;
+    if (!hasAttention(state, plotter)) {
+      plotter.attentionUntil = state.month + GOSSIP_ATTENTION_MONTHS;
+      plotter.attentionReason = 'Suspected of plotting';
+    }
+    addLog(state, `${fullName(p)} told the CEO that ${fullName(plotter)} is campaigning against ${target.id === me ? 'the CEO' : fullName(target)}.`, 2, [plotter.id, target.id]);
+    return `that ${fullName(plotter)} is campaigning against ${target.id === me ? 'you' : p.id === target.id ? pronoun(p, 'object') : fullName(target)}`;
+  }
+
+  const foes = Object.entries(state.relations[p.id] ?? {})
+    .filter(([, r]) => r.tag === 'rival' || r.tag === 'grudge')
+    .map(([id]) => state.people[id])
+    .filter((x): x is Person => !!x && isActive(x) && x.id !== me)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  for (const foe of foes) {
+    const secret = foe.secrets.filter((x) => !x.revealed).sort((a, b) => (a.id < b.id ? -1 : 1))[0];
+    if (!secret) continue;
+    secret.revealed = true;
+    addLifeEvent(state, foe.id, 'exposed', `${fullName(p)} gave the CEO a secret in a private meeting: ${secret.description}`, -2, true);
+    return `something on ${fullName(foe)}: ${secret.description}`;
+  }
+  return null;
+}
+
 export function meet(state: GameState, personId: PersonId, approach: MeetingApproach, promise?: MeetingPromise): ActionResult {
   const p = staffTarget(state, personId);
   if (isFail(p)) return p;
@@ -726,7 +796,8 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
     adjustOpinion(state, personId, me.id, o);
     adjustLoyalty(state, personId, Math.max(0, Math.round(4 * charm * mod)));
     adjustSatisfaction(state, personId, 2);
-    return ok(`You spent an hour with ${name}. ${capitalize(pronoun(p, 'subject'))} left ${o >= 6 ? 'warmer toward you' : 'a little less guarded'}.${skip}`);
+    const line = reply(p, state.month, approach, o >= 6 ? RAPPORT_WARM : RAPPORT_GUARDED);
+    return withScene(ok(`You spent an hour with ${name}. ${capitalize(pronoun(p, 'subject'))} left ${o >= 6 ? 'warmer toward you' : 'a little less guarded'}.${skip}`), p, line);
   }
 
   if (approach === 'promise') {
@@ -736,7 +807,7 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
     adjustOpinion(state, personId, me.id, PROMISE_OPINION);
     addLifeEvent(state, personId, 'promised', `The CEO promised ${pronoun(p, 'object')} ${PROMISE_LABEL[pr.kind]}: ${pr.detail}`, 1, true);
     addLog(state, `Promised ${name} ${PROMISE_LABEL[pr.kind]} within ${months} months.`, 1, [personId]);
-    return ok(`${name} took you at your word. It is due in ${months} month${months === 1 ? '' : 's'}.${skip}`);
+    return withScene(ok(`${name} took you at your word. It is due in ${months} month${months === 1 ? '' : 's'}.${skip}`), p, reply(p, state.month, approach, PROMISE_REPLY));
   }
 
   if (approach === 'threaten') {
@@ -749,26 +820,30 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
     ripple(state, personId, -3);
     if (setbackPlot(state, personId, THREAT_PLOT_SETBACK)) loyaltyNote = ' The campaign loses its nerve.';
     let extra = '';
+    let line = reply(p, state.month, approach, THREAT_CALM);
     if ((p.traits.includes('ruthless') || p.traits.includes('vain')) && chance(state, 0.5)) {
       adjustOpinion(state, personId, me.id, -10);
       adjustLoyalty(state, personId, -8);
       state.incidents.push({ kind: 'scheme', personIds: [personId, me.id], unitId: p.unitId });
       extra = ` ${capitalize(pronoun(p, 'subject'))} did not take it quietly.`;
+      line = variant(THREAT_DEFIANT, p.id, state.month, approach);
     } else if (p.traits.includes('principled') && chance(state, 0.5) && state.directors.length) {
       const d = pick(state, state.directors);
       adjustOpinion(state, d.personId, me.id, -8);
       state.company.boardConfidence = clamp(state.company.boardConfidence - 3);
       state.incidents.push({ kind: 'complaint', personIds: [personId, bossOf(state, personId) ?? me.id], unitId: p.unitId });
       extra = ` ${capitalize(pronoun(p, 'subject'))} took it to the board.`;
+      line = variant(["This is going to the board.", "You'll explain that to the directors, not to me."], p.id, state.month, approach);
     }
     addLog(state, `Threatened ${name}.`, 1, [personId]);
-    return ok(`${name} will keep ${pronoun(p, 'possessive')} head down for now.${loyaltyNote}${extra}${skip}`);
+    return withScene(ok(`${name} will keep ${pronoun(p, 'possessive')} head down for now.${loyaltyNote}${extra}${skip}`), p, line);
   }
 
   // probe
   const odds = clamp(0.5 + (me.skills.guile - p.skills.guile) / 100 - (p.traits.includes('paranoid') ? 0.15 : 0), 0.15, 0.9);
   const learned: string[] = [];
-  if (chance(state, odds)) {
+  const talked = chance(state, odds);
+  if (talked) {
     p.investigatedMonth = state.month;
     learned.push(`who ${pronoun(p, 'subject')} ${verb(p, 'trust')} and who ${pronoun(p, 'subject')} ${verb(p, 'resent')}`);
     const c = p.cliqueId ? state.cliques[p.cliqueId] : null;
@@ -782,11 +857,14 @@ export function meet(state: GameState, personId: PersonId, approach: MeetingAppr
       learned.push(`a secret: ${hidden.description}`);
       addLifeEvent(state, personId, 'exposed', `A private meeting with the CEO drew out a secret: ${hidden.description}`, -2, true);
     }
+    const gossip = probeGossip(state, p);
+    if (gossip) learned.push(`and ${gossip}`);
   } else if (p.traits.includes('paranoid')) {
     adjustOpinion(state, personId, me.id, -4);
   }
   addLog(state, `Probed ${name}.`, 1, [personId]);
-  return ok(learned.length ? `Probing ${name}, you learned ${learned.join('; ')}.${skip}` : `${name} gave you nothing.${skip}`);
+  const line = reply(p, state.month, approach, talked ? PROBE_TALKED : PROBE_CLOSED);
+  return withScene(ok(learned.length ? `Probing ${name}, you learned ${learned.join('; ')}.${skip}` : `${name} gave you nothing.${skip}`), p, line);
 }
 
 // ---- Security ----
@@ -898,18 +976,23 @@ export function lobbyDirector(state: GameState, directorId: PersonId, approach: 
   if (blocked) return blocked;
   let delta = 0;
   let message: string;
+  let line: string;
+  const say = (...lines: string[]) => variant(lines, d.id, state.month, approach);
 
   if (approach === 'persuade') {
     delta = Math.max(1, Math.round(5 * recentPerformance(state) * Math.min(1.3, charmOf(state)) + (d.traits.includes('vain') ? 1 : 0)));
     message = `You walked ${name} through the numbers. ${capitalize(pronoun(d, 'subject'))} ${be(d)} more receptive.`;
+    line = reply(d, state.month, approach, DIRECTOR_PERSUADED);
   } else if (approach === 'favor') {
     state.player.personalCash -= FAVOR_COST;
     if (d.traits.includes('principled')) {
       delta = -8;
       message = `${name} took your favor as a bribe and said so.`;
+      line = say('Is this meant to be a bribe? Take it back.', 'I am not for sale, and I will say so to the others.');
     } else {
       delta = Math.round(FAVOR_SWING * (0.6 + d.greed / 100));
       message = `${name} accepted your favor, at a cost of ${formatZuzu(FAVOR_COST)}.`;
+      line = say("That is generous. I won't forget it.", 'Between us, then. Thank you.');
       addLifeEvent(state, directorId, 'favor', 'Accepted a personal favor from the CEO.', 1, true);
     }
   } else {
@@ -917,17 +1000,19 @@ export function lobbyDirector(state: GameState, directorId: PersonId, approach: 
     if (secret) {
       delta = 15 + 10 * secret.severity;
       message = `You let ${name} know what you knew. ${capitalize(pronoun(d, 'subject'))} fell in line.`;
+      line = say('I understand. We need not discuss it again.', 'You have made your point.');
       addLifeEvent(state, directorId, 'pressured', `Was pressured over ${secret.description}`, -3, true);
     } else {
       delta = PRESSURE_BACKFIRE;
       state.company.boardConfidence = clamp(state.company.boardConfidence - 4);
       message = `${name} had nothing to fear from you and went to the other directors about it.`;
+      line = say('Did you really think that would work on me?', 'You have made a serious mistake coming here.');
     }
   }
   adjustOpinion(state, directorId, me, delta);
   if (delta > 0) state.company.boardConfidence = clamp(state.company.boardConfidence + Math.round(delta / 8));
   addLog(state, `Lobbied ${name} (${approach}).`, 2, [directorId]);
-  return ok(message);
+  return withScene(ok(message), d, line);
 }
 
 /** Announces profit guidance for the current quarter. Only once per quarter. */

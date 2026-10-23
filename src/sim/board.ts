@@ -24,6 +24,7 @@ import {
 import { chance, gaussian } from './rng';
 import { endGame } from './epilogue';
 import { plotProgress } from './plots';
+import { issueAsks, judgeAsks } from './asks';
 import { clamp, sum } from './util';
 
 // ---- Tuning -------------------------------------------------------------
@@ -323,6 +324,10 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
     adjustOpinion(state, d.id, ceo.id, Math.round((delta + drift) * 10) / 10);
   }
 
+  // The directors' asks for the quarter are judged on the figures just closed.
+  const asks = judgeAsks(state);
+  if (asks.length) meeting.asks = asks;
+
   // 2. Motions.
   const noConf = dirs.length ? raiseNoConfidence(state, dirs) : null;
   const motions: Motion[] = [];
@@ -337,6 +342,7 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
   const q = quarterLabel(quarter.month);
   const g = quarter.surprise === null ? 'with no guidance given' : `${quarter.surprise >= 0 ? 'beating' : 'missing'} guidance by ${Math.abs(Math.round(quarter.surprise * 100))}%`;
   lines.push(`${q}: profit ${formatZuzu(quarter.profit)}, ${g}. Board confidence ${Math.round(quarter.boardConfidenceAfter)}.`);
+  if (asks.length) lines.push(`Directors' asks: ${asks.filter((a) => a.met).length} of ${asks.length} met.`);
   for (const m of motions) {
     const yes = Object.values(m.votes).filter(Boolean).length;
     const no = dirs.length - yes;
@@ -355,5 +361,6 @@ export function runBoardMeeting(state: GameState, quarter: QuarterResult): Board
     addLog(state, 'The board passed a vote of no confidence. The CEO is out.', 3, [ceo.id]);
     endGame(state, 'ousted');
   }
+  if (!state.gameOver) issueAsks(state);
   return meeting;
 }

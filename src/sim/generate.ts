@@ -22,6 +22,7 @@ import type {
 } from './types';
 import { addLog, addSecret, bossOf, fullName, newId, peopleUnder, placeAsMember, seatLead, unit, unitsUnder } from './org';
 import { baseName, marketSalary, roleRank, salaryBand } from './roles';
+import { issueAsks } from './asks';
 import { clamp } from './util';
 import { chance, gaussian, pick, randInt, random, shuffle, weightedPick } from './rng';
 import {
@@ -785,6 +786,8 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
     plots: {},
     unitSizes: {},
     seatVacantSince: {},
+    asks: [],
+    rivalId: null,
   };
   state.company.boardConfidence = randInt(state, 55, 65);
 
@@ -850,6 +853,7 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
 
   // The antagonist: passed over for CEO. Hidden; nothing is logged.
   const antagonist = weightedPick(state, officers, (o) => ANTAGONIST_WEIGHT[unit(state, o.unitId!).functionKind!]);
+  state.rivalId = antagonist.id;
   antagonist.ambition = randInt(state, 90, 98);
   antagonist.loyalty = randInt(state, 8, 20);
   antagonist.involvement = Math.max(antagonist.involvement, randInt(state, 70, 90));
@@ -869,5 +873,6 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
     2,
     [ceo.id],
   );
+  issueAsks(state);
   return state;
 }

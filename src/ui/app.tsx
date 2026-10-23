@@ -11,6 +11,7 @@ import { BoardView, MeetingView } from './board';
 import { MoreView } from './more';
 import { GameOver } from './gameover';
 import { Title } from './title';
+import { SceneSheet } from './scene';
 import { closeSheet, commit, errMsg, openSheet, S, setTab, toast, useStore, useToast, type Sheet as SheetT, type Tab } from './store';
 
 const pendingInbox = (g: GameState) => g.inbox.filter((i) => i.resolution === null);
@@ -135,6 +136,7 @@ function renderSheet(s: SheetT, i: number) {
     case 'bonus': return <BonusSheet key={i} />;
     case 'endMonth': return <EndMonthSheet key={i} />;
     case 'boardResult': return <BoardResult key={i} index={s.index} />;
+    case 'scene': return <SceneSheet key={i} speakerId={s.speakerId} line={s.line} message={s.message} ok={s.ok} />;
   }
 }
 

@@ -78,6 +78,19 @@ export const npcTuning = {
   plotConfidenceDrain: 0.4,
   /** A plotter who is warm toward the CEO (loyal, liked) loses this much progress per point of warmth. */
   plotWarmDecay: 0.15,
+  // Tip-offs: monthly chance (scaled up as a plot matures) that someone close to a plot the CEO doesn't know about warns them.
+  tipOffBase: 0.035,
+  tipOffBaseCeo: 0.06,
+  tipOffMinLoyalty: 55,
+  tipOffMinOpinion: 25,
+  /** The target of a plot warns the CEO themselves at this loyalty. */
+  tipOffTargetLoyalty: 50,
+  tipOffCooldown: 4,
+  // Pitches: ambitious managers ask the CEO to back them against a rival.
+  pitchChance: 0.05,
+  pitchMinInvolvement: 40,
+  pitchMinAmbition: 55,
+  pitchCooldown: 12,
   // Loyalty to the CEO drifts with how happy and well-regarded managers are, and
   // erodes slowly at the top when the CEO never shows up.
   loyaltyDrift: 0.04,
@@ -144,6 +157,8 @@ const KIND_WEIGHT: Record<RaisedIncident['kind'], number> = {
   complaint: 3,
   cliqueFormed: 3,
   managerFiring: 4,
+  tipOff: 6,
+  pitch: 5,
 };
 const RIVAL_CORPS = ['Kessler-Ono', 'Vantage Meridian', 'Ashgrove Combine', 'Tidewater Group', 'Halden Strand', 'Orrery Holdings'];
 const QUIT_FATES = [
@@ -686,6 +701,62 @@ function concludePlot(ctx: Ctx, p: Person, t: Person): void {
   delete s.plots[p.id];
 }
 
+// ------------------------------------------------------------- tip-offs
+
+/** The colleague most inclined to warn the CEO about a plot: loyal or well-disposed, and not in the plotter's camp. */
+function pickInformant(ctx: Ctx, plotter: Person, target: Person): Person | null {
+  const s = ctx.s;
+  const ceoId = s.player.personId;
+  const camp = clique(s, plotter.cliqueId);
+  const pool = new Set<PersonId>();
+  for (const uid of [plotter.unitId, target.unitId]) {
+    const u = uid ? s.units[uid] : undefined;
+    if (!u) continue;
+    if (u.leadId) pool.add(u.leadId);
+    for (const id of u.memberIds) pool.add(id);
+  }
+  for (const id of Object.keys(s.relations[plotter.id] ?? {})) pool.add(id);
+  for (const [id, row] of Object.entries(s.relations)) if (row[plotter.id]) pool.add(id);
+  if (target.id !== ceoId) pool.add(target.id);
+
+  let best: Person | null = null;
+  let bestScore = -Infinity;
+  for (const id of pool) {
+    const o = s.people[id];
+    if (!isStaff(o) || o.id === plotter.id || o.id === ceoId) continue;
+    const regard = opinionOf(s, o.id, ceoId);
+    if (o.id === target.id) {
+      if (o.loyalty < T.tipOffTargetLoyalty) continue;
+    } else if (camp?.memberIds.includes(o.id) || (o.loyalty < T.tipOffMinLoyalty && regard < T.tipOffMinOpinion)) continue;
+    const score = o.loyalty + regard;
+    if (score > bestScore || (score === bestScore && best && o.id < best.id)) {
+      best = o;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** Plots the CEO hasn't heard of leak: someone close to one may warn the CEO. */
+function tipOffs(ctx: Ctx): void {
+  const s = ctx.s;
+  const ceoId = s.player.personId;
+  for (const [pid, plot] of Object.entries(s.plots)) {
+    if (plot.known) continue;
+    const p = s.people[pid];
+    const t = s.people[plot.targetId];
+    if (!isStaff(p) || !t || !isActive(t) || recent(ctx, p, 'tippedOn', T.tipOffCooldown)) continue;
+    const vsCeo = t.id === ceoId;
+    if (!chance(s, (vsCeo ? T.tipOffBaseCeo : T.tipOffBase) * (0.5 + plot.progress / 60))) continue;
+    const informant = pickInformant(ctx, p, t);
+    if (!informant) continue;
+    raise(ctx, informant, { kind: 'tipOff', personIds: [informant.id, p.id, t.id], unitId: p.unitId }, vsCeo ? 8 : 2, () => {
+      addLifeEvent(s, informant.id, 'tipOff', `Warned the CEO about ${fullName(p)}'s campaign.`, 1, false);
+      addLifeEvent(s, p.id, 'tippedOn', 'Was reported to the CEO as running a campaign.', 0, false);
+    });
+  }
+}
+
 // ---------------------------------------------------------- managers
 
 /** Would `m` shield `w` from dismissal? Sponsors, friends and lovers, or anyone who thinks highly of them. */
@@ -943,6 +1014,51 @@ function requests(ctx: Ctx, p: Person): void {
   }
 }
 
+// ------------------------------------------------------------- pitches
+
+/** Who an ambitious manager would ask the CEO to cut down: their plot's target, else their worst enemy among the leads. */
+function pitchRival(s: GameState, p: Person): Person | null {
+  const plot = s.plots[p.id];
+  const target = plot && plot.targetId !== s.player.personId ? s.people[plot.targetId] : undefined;
+  if (isStaff(target)) return target;
+  let best: Person | null = null;
+  let bestOpinion = Infinity;
+  for (const [oid, rel] of Object.entries(s.relations[p.id] ?? {})) {
+    if (rel.tag !== 'rival' && rel.tag !== 'grudge') continue;
+    const o = s.people[oid];
+    if (!isStaff(o) || rank(o) < roleRank.teamLead) continue;
+    if (rel.opinion < bestOpinion || (rel.opinion === bestOpinion && best && oid < best.id)) {
+      best = o;
+      bestOpinion = rel.opinion;
+    }
+  }
+  return best;
+}
+
+/** The worst thing the pitcher can plausibly prove about the rival: they are cunning, or close to someone it implicates. */
+function pitchSecret(s: GameState, p: Person, rival: Person): string | null {
+  const close = (id: PersonId) => {
+    const tag = getRelation(s, p.id, id)?.tag;
+    return tag === 'mentor' || tag === 'friend' || tag === 'lover';
+  };
+  const known = rival.secrets
+    .filter((x) => !x.revealed && (p.skills.guile >= 50 || x.involvedIds.some(close)))
+    .sort((a, b) => b.severity - a.severity || a.id.localeCompare(b.id));
+  return known[0]?.id ?? null;
+}
+
+function pitch(ctx: Ctx, p: Person): void {
+  const s = ctx.s;
+  if (rank(p) < roleRank.subdivisionHead || p.involvement < T.pitchMinInvolvement || p.ambition < T.pitchMinAmbition) return;
+  if (recent(ctx, p, 'pitched', T.pitchCooldown)) return;
+  const rival = pitchRival(s, p);
+  if (!rival) return;
+  if (!chance(s, T.pitchChance * (p.involvement / 100) * (p.ambition / 100) * traitMult(p))) return;
+  raise(ctx, p, { kind: 'pitch', personIds: [p.id, rival.id], secretId: pitchSecret(s, p, rival) }, 0, () =>
+    addLifeEvent(s, p.id, 'pitched', `Asked the CEO for backing against ${fullName(rival)}.`, 0, false),
+  );
+}
+
 // ------------------------------------------------------------ leaving
 
 function leaving(ctx: Ctx, p: Person): void {
@@ -1052,11 +1168,13 @@ export function runNpcMonth(state: GameState): void {
     discoverEmbezzlement(ctx, p);
   }
   runPlots(ctx);
+  tipOffs(ctx);
   for (const p of staff) if (live(p)) reviewPerformance(ctx, p);
   fillVacancies(ctx);
   hireToSize(ctx);
   giveRaises(ctx);
   for (const p of staff) if (live(p)) requests(ctx, p);
+  for (const p of staff) if (live(p)) pitch(ctx, p);
   for (const p of staff) if (live(p)) leaving(ctx, p);
   for (const p of staff) if (live(p)) breakthroughOrScandal(ctx, p);
   cliqueUpkeep(s);

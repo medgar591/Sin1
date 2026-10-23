@@ -14,7 +14,10 @@ export type Sheet =
   | { k: 'unit'; id: UnitId }
   | { k: 'bonus' }
   | { k: 'endMonth' }
-  | { k: 'boardResult'; index: number };
+  | { k: 'boardResult'; index: number }
+  | { k: 'scene'; speakerId: PersonId; line: string; message: string; ok: boolean };
+
+export type OrgMode = 'chart' | 'players' | 'units';
 
 interface Toast {
   id: number;
@@ -26,6 +29,7 @@ interface UiState {
   game: GameState | null;
   tab: Tab;
   orgUnit: UnitId | null;
+  orgMode: OrgMode;
   sheets: Sheet[];
   toast: Toast | null;
 }
@@ -34,6 +38,7 @@ export const S: UiState = {
   game: null,
   tab: 'dash',
   orgUnit: null,
+  orgMode: 'chart',
   sheets: [],
   toast: null,
 };
@@ -147,7 +152,8 @@ export function run(fn: (s: GameState) => ActionResult): boolean {
   if (!g) return false;
   try {
     const r = fn(g);
-    toast(r.message, r.ok ? 'ok' : 'bad');
+    if (r.scene) S.sheets = [...S.sheets, { k: 'scene', speakerId: r.scene.speakerId, line: r.scene.line, message: r.message, ok: r.ok }];
+    else toast(r.message, r.ok ? 'ok' : 'bad');
     commit();
     return r.ok;
   } catch (e) {
@@ -176,11 +182,22 @@ export function closeSheet(): void {
 
 export function goOrg(unitId: UnitId): void {
   S.orgUnit = unitId;
+  S.orgMode = 'units';
   S.tab = 'org';
   S.sheets = [];
   notify();
 }
 export function setOrgUnit(unitId: UnitId): void {
   S.orgUnit = unitId;
+  notify();
+}
+export function setOrgMode(m: OrgMode): void {
+  S.orgMode = m;
+  notify();
+}
+/** Opens a unit in the Units drill-down (from the chart, say). */
+export function showUnit(unitId: UnitId): void {
+  S.orgUnit = unitId;
+  S.orgMode = 'units';
   notify();
 }

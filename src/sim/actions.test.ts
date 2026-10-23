@@ -383,6 +383,103 @@ describe('lobbying', () => {
   });
 });
 
+describe('scenes', () => {
+  it('meeting someone returns what they said, the same line for the same game', () => {
+    const a = smallCompany();
+    const b = smallCompany();
+    a.state.player.attentionLeft = 9;
+    b.state.player.attentionLeft = 9;
+    for (const approach of ['rapport', 'threaten', 'probe'] as const) {
+      const ra = A.meet(a.state, a.workers[0].id, approach);
+      const rb = A.meet(b.state, b.workers[0].id, approach);
+      expect(ra.scene).toEqual({ speakerId: a.workers[0].id, line: expect.any(String) });
+      expect(ra.scene!.line.length).toBeGreaterThan(3);
+      expect(rb.scene!.line).toBe(ra.scene!.line);
+    }
+    const r = A.meet(a.state, a.workers[1].id, 'promise', { kind: 'raise', detail: 'A raise', months: 3 });
+    expect(r.scene?.speakerId).toBe(a.workers[1].id);
+    expect(A.meet(a.state, a.workers[1].id, 'rapport').scene).toBeDefined();
+  });
+  it('a failed action has no scene', () => {
+    const { state, ceo, workers } = smallCompany();
+    expect(A.meet(state, ceo.id, 'rapport').scene).toBeUndefined();
+    state.player.attentionLeft = 0;
+    expect(A.meet(state, workers[0].id, 'rapport').scene).toBeUndefined();
+  });
+  it('lobbying a director returns their reply', () => {
+    const { state, directors } = smallCompany();
+    state.player.attentionLeft = 9;
+    for (const approach of ['persuade', 'favor', 'pressure'] as const) {
+      const r = A.lobbyDirector(state, directors[0].id, approach);
+      expect(r.scene).toEqual({ speakerId: directors[0].id, line: expect.any(String) });
+    }
+  });
+});
+
+describe('probe gossip', () => {
+  /** Probes until the person talks (seeded, so the test is stable). */
+  function probeUntilTalked(setup: (f: ReturnType<typeof smallCompany>) => void) {
+    for (let seed = 1; seed <= 40; seed++) {
+      const f = smallCompany(seed);
+      f.state.player.attentionLeft = 9;
+      f.ceo.skills.guile = 100;
+      setup(f);
+      const r = A.meet(f.state, f.workers[0].id, 'probe');
+      if (r.message.includes('you learned')) return { f, r };
+    }
+    throw new Error('nobody ever talked');
+  }
+
+  it('a colleague tells you about a plot, which becomes known and puts the plotter on your radar', () => {
+    const { f, r } = probeUntilTalked((f) => {
+      f.workers[0].traits = ['gossip'];
+      f.workers[0].skills.guile = 0;
+      f.state.plots = { [f.workers[1].id]: { targetId: f.lead.id, progress: 50, stage: 1 } };
+    });
+    expect(f.state.plots[f.workers[1].id].known).toBe(true);
+    expect(f.workers[1].attentionUntil).toBe(f.state.month + 3);
+    expect(f.workers[1].attentionReason).toBe('Suspected of plotting');
+    expect(r.message).toContain(`; and that ${f.workers[1].firstName} ${f.workers[1].lastName} is campaigning against ${f.lead.firstName} ${f.lead.lastName}`);
+  });
+
+  it('keeps an existing reason for being on the radar and ignores plots nobody near knows of', () => {
+    const { f } = probeUntilTalked((f) => {
+      f.workers[0].traits = ['gossip'];
+      f.workers[0].skills.guile = 0;
+      f.workers[1].attentionUntil = 9;
+      f.workers[1].attentionReason = 'Scandal';
+      f.state.plots = { [f.workers[1].id]: { targetId: f.lead.id, progress: 50, stage: 1 } };
+    });
+    expect(f.workers[1].attentionReason).toBe('Scandal');
+    expect(f.workers[1].attentionUntil).toBe(9);
+
+    // A plot between strangers in another division stays hidden.
+    const { f: g } = probeUntilTalked((g) => {
+      g.workers[0].traits = ['gossip'];
+      g.workers[0].skills.guile = 0;
+      const other = makeUnit(g.state, 'division', g.root.id, { name: 'Elsewhere' });
+      const a = makePerson(g.state, 'divisionHead', { unitId: other.id });
+      const b = makePerson(g.state, 'officer', { unitId: other.id });
+      other.leadId = a.id;
+      g.state.plots = { [a.id]: { targetId: b.id, progress: 50, stage: 1 } };
+    });
+    expect(Object.values(g.state.plots)[0].known).toBeUndefined();
+  });
+
+  it('otherwise reveals a secret of someone the person is feuding with', () => {
+    const { f, r } = probeUntilTalked((f) => {
+      f.workers[0].traits = ['gossip'];
+      f.workers[0].skills.guile = 0;
+      f.workers[2].secrets = [{ id: 'sx', kind: 'embezzlement', description: 'Skimmed money.', severity: 2, revealed: false, involvedIds: [] }];
+      setTag(f.state, f.workers[0].id, f.workers[2].id, 'rival');
+    });
+    expect(f.workers[2].secrets[0].revealed).toBe(true);
+    expect(f.workers[2].history.some((h) => h.kind === 'exposed' && h.byPlayer && h.impact === -2)).toBe(true);
+    expect(r.message).toContain('something on');
+    expect(r.message).toContain('Skimmed money.');
+  });
+});
+
 describe('epilogue', () => {
   it('ranks and tells stories', () => {
     const { state, workers, lead, team } = smallCompany();

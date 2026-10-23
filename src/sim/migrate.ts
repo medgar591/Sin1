@@ -18,6 +18,7 @@ export function migrateState(state: GameState): GameState {
   s.plots ??= s.npcPlots ?? {};
   s.unitSizes ??= s.npcUnitSizes ?? {};
   s.seatVacantSince ??= s.npcSeatVacant ?? {};
+  s.asks ??= [];
   delete s.npcPlots;
   delete s.npcUnitSizes;
   delete s.npcSeatVacant;

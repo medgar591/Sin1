@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { npcTuning, runNpcMonth } from './npc';
-import { smallCompany } from './testkit';
+import { makePerson, smallCompany } from './testkit';
 import { generateGame } from './generate';
-import { adjustOpinion, opinionOf, removeFromCompany, setTag } from './org';
+import { addSecret, adjustOpinion, opinionOf, removeFromCompany, setTag } from './org';
 import type { GameState } from './types';
 
 const saved = { ...npcTuning };
@@ -111,6 +111,77 @@ describe('managers', () => {
     expect(f.team.memberIds.length).toBe(3);
     const hired = f.state.people[f.team.memberIds[f.team.memberIds.length - 1]];
     expect(hired.history.some((e) => e.kind === 'hired' && !e.byPlayer)).toBe(true);
+  });
+});
+
+describe('politics', () => {
+  /** Runs months until an incident of the kind appears; returns it, or undefined after `max` months. */
+  function until(state: GameState, kind: string, max: number) {
+    for (let i = 0; i < max; i++) {
+      runNpcMonth(state);
+      const found = state.incidents.find((x) => x.kind === kind);
+      state.incidents = [];
+      state.month++;
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** The CFO runs a campaign against the CEO; a loyal colleague works in Finance. */
+  function plotAgainstCeo() {
+    const f = smallCompany();
+    const colleague = makePerson(f.state, 'worker', { unitId: f.finance.id, loyalty: 80 });
+    f.finance.memberIds.push(colleague.id);
+    f.state.plots[f.cfo.id] = { targetId: f.ceo.id, progress: 0, stage: 0 };
+    return { f, colleague };
+  }
+
+  it('a long-running unknown plot against the CEO eventually draws a tip-off', () => {
+    const { f, colleague } = plotAgainstCeo();
+    const inc = until(f.state, 'tipOff', 150);
+    expect(inc).toBeDefined();
+    expect(inc!.personIds).toEqual([colleague.id, f.cfo.id, f.ceo.id]);
+    expect(inc!.unitId).toBe(f.finance.id);
+    expect(colleague.history.some((e) => e.kind === 'tipOff')).toBe(true);
+  });
+
+  it('nobody tips off a plot the CEO already knows about', () => {
+    const { f } = plotAgainstCeo();
+    f.state.plots[f.cfo.id].known = true;
+    expect(until(f.state, 'tipOff', 60)).toBeUndefined();
+  });
+
+  it('the plotter\'s own clique does not inform on them', () => {
+    const { f, colleague } = plotAgainstCeo();
+    f.state.cliques.k1 = { id: 'k1', name: 'The Old Hands', leaderId: f.cfo.id, memberIds: [f.cfo.id, colleague.id], agenda: 'x', known: false, momentum: 0 };
+    f.cfo.cliqueId = 'k1';
+    colleague.cliqueId = 'k1';
+    npcTuning.tipOffBaseCeo = 1;
+    expect(until(f.state, 'tipOff', 20)).toBeUndefined();
+  });
+
+  it('an ambitious division head pitches against a rival, carrying a secret, then waits a year', () => {
+    const f = smallCompany();
+    npcTuning.pitchChance = 1;
+    f.head.ambition = 90;
+    f.head.involvement = 90;
+    f.head.skills.guile = 80;
+    setTag(f.state, f.head.id, f.lead.id, 'rival');
+    const sec = addSecret(f.state, f.lead.id, { kind: 'embezzlement', description: 'Has been skimming.', severity: 2 });
+    const inc = until(f.state, 'pitch', 6);
+    expect(inc).toMatchObject({ kind: 'pitch', personIds: [f.head.id, f.lead.id], secretId: sec.id });
+    expect(f.head.history.some((e) => e.kind === 'pitched')).toBe(true);
+    expect(until(f.state, 'pitch', 11)).toBeUndefined();
+  });
+
+  it('low-ambition managers and workers do not pitch', () => {
+    const f = smallCompany();
+    npcTuning.pitchChance = 1;
+    setTag(f.state, f.head.id, f.lead.id, 'rival');
+    setTag(f.state, f.workers[0].id, f.lead.id, 'rival');
+    f.workers[0].ambition = 100;
+    f.workers[0].involvement = 100;
+    expect(until(f.state, 'pitch', 12)).toBeUndefined();
   });
 });
 

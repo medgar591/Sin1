@@ -11,6 +11,7 @@ import type {
   Relation,
   RelTag,
   Secret,
+  FunctionKind,
   UnitId,
 } from './types';
 import { isSeatTitle, leadTitle, memberTitle, roleForUnitKind } from './roles';
@@ -345,4 +346,19 @@ export function formatZuzu(amount: number): string {
   if (a >= 1e6) return `${sign}${(a / 1e6).toFixed(1)}Mㄓ`;
   if (a >= 1e3) return `${sign}${Math.round(a / 1e3)}Kㄓ`;
   return `${sign}${Math.round(a)}ㄓ`;
+}
+
+/** The active lead of a C-suite function, if the seat is filled. */
+export function functionHead(state: GameState, kind: FunctionKind): Person | null {
+  const u = Object.values(state.units).find((x) => x.functionKind === kind);
+  const lead = u?.leadId ? state.people[u.leadId] : undefined;
+  return lead && isActive(lead) ? lead : null;
+}
+
+/** The CEO's chief of staff (or, failing that, whoever else works in the CEO's office). */
+export function chiefOfStaff(state: GameState): Person | null {
+  const root = state.units[state.rootUnitId];
+  if (!root) return null;
+  const staff = root.memberIds.map((id) => state.people[id]).filter((p): p is Person => !!p && isActive(p));
+  return staff.find((p) => p.title === 'Chief of Staff') ?? staff[0] ?? null;
 }

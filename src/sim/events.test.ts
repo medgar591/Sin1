@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { smallCompany, makePerson, makeUnit } from './testkit';
 import { expireInbox, generateEvents, resolveInboxItem } from './events';
+import { addSecret } from './org';
 import type { Incident, IncidentKind } from './types';
 
 function setup() {
@@ -17,7 +18,15 @@ function raise(c: ReturnType<typeof setup>, kind: IncidentKind, ids: string[], e
 
 describe('incident items', () => {
   const [w0, w1] = [0, 1];
-  it.each<[IncidentKind, (c: ReturnType<typeof setup>) => string[]]>([
+  type Fixture = ReturnType<typeof setup>;
+  /** Worker 1 warns the lead about worker 0's plot. */
+  const tipOffPlot = (c: Fixture) => {
+    c.state.plots[c.workers[w0].id] = { targetId: c.lead.id, progress: 50, stage: 1 };
+    return {};
+  };
+  /** The lead pitches against worker 0, offering a secret. */
+  const pitchWithDirt = (c: Fixture) => ({ secretId: addSecret(c.state, c.workers[w0].id, { kind: 'embezzlement', description: 'Has been skimming.', severity: 2 }).id });
+  it.each<[IncidentKind, (c: Fixture) => string[], ((c: Fixture) => object)?]>([
     ['raiseDemand', (c) => [c.workers[w0].id]],
     ['promotionDemand', (c) => [c.workers[w0].id]],
     ['feud', (c) => [c.workers[w0].id, c.workers[w1].id]],
@@ -29,16 +38,18 @@ describe('incident items', () => {
     ['resignationThreat', (c) => [c.workers[w0].id]],
     ['poachOffer', (c) => [c.workers[w0].id]],
     ['complaint', (c) => [c.workers[w0].id, c.lead.id]],
-  ])('%s makes an item with 2+ options that resolves via every option', (kind, ids) => {
+    ['tipOff', (c) => [c.workers[w1].id, c.workers[w0].id, c.lead.id], tipOffPlot],
+    ['pitch', (c) => [c.lead.id, c.workers[w0].id], pitchWithDirt],
+  ])('%s makes an item with 2+ options that resolves via every option', (kind, ids, prep) => {
     const probe = setup();
-    const item = raise(probe, kind, ids(probe));
+    const item = raise(probe, kind, ids(probe), prep?.(probe));
     expect(item.kind).toBe(kind);
     expect(item.options.length).toBeGreaterThanOrEqual(2);
     expect(probe.state.incidents).toEqual([]);
     for (const opt of item.options) {
       const c = setup();
       c.state.player.attentionLeft = 3;
-      const it2 = raise(c, kind, ids(c));
+      const it2 = raise(c, kind, ids(c), prep?.(c));
       const r = resolveInboxItem(c.state, it2.id, opt.id);
       expect(r.ok, `${kind}/${opt.id}: ${r.message}`).toBe(true);
       expect(it2.resolution).toBe(opt.id);
@@ -144,6 +155,102 @@ describe('consequences', () => {
       seen = c.state.incidents.some((i) => i.kind === 'resignationThreat');
     }
     expect(seen).toBe(true);
+  });
+});
+
+describe('politics pulled to the CEO', () => {
+  function plotted() {
+    const c = setup();
+    const [plotter, informant] = c.workers;
+    c.state.plots[plotter.id] = { targetId: c.state.player.personId, progress: 45, stage: 1 };
+    return { c, plotter, informant };
+  }
+
+  it('a tipOff item marks the plot known and puts the plotter on the radar', () => {
+    const { c, plotter, informant } = plotted();
+    expect(c.state.plots[plotter.id].known).toBeUndefined();
+    const item = raise(c, 'tipOff', [informant.id, plotter.id, c.ceo.id]);
+    expect(item.kind).toBe('tipOff');
+    expect(item.speakerId).toBe(informant.id);
+    expect(item.body).toContain('against you');
+    expect(c.state.plots[plotter.id].known).toBe(true);
+    expect(plotter.attentionReason).toBeTruthy();
+  });
+
+  it('tipOff options: note is the default, reward pays, watch sets the plot back', () => {
+    const { c, plotter, informant } = plotted();
+    const item = raise(c, 'tipOff', [informant.id, plotter.id, c.ceo.id]);
+    expect(item.options.map((o) => o.id)).toEqual(['note', 'reward', 'watch']);
+    const cash = c.state.company.cash;
+    const loyalty = informant.loyalty;
+    expect(resolveInboxItem(c.state, item.id, 'reward').ok).toBe(true);
+    expect(c.state.company.cash).toBeLessThan(cash);
+    expect(informant.loyalty).toBe(loyalty + 8);
+    const c2 = plotted();
+    const it2 = raise(c2.c, 'tipOff', [c2.informant.id, c2.plotter.id, c2.c.ceo.id]);
+    c2.c.state.player.attentionLeft = 3;
+    expect(resolveInboxItem(c2.c.state, it2.id, 'watch').ok).toBe(true);
+    expect(c2.c.state.plots[c2.plotter.id].progress).toBe(25);
+    expect(c2.plotter.investigatedMonth).toBe(c2.c.state.month);
+  });
+
+  it('a tipOff for a departed plotter is moot', () => {
+    const { c, plotter, informant } = plotted();
+    const item = raise(c, 'tipOff', [informant.id, plotter.id, c.ceo.id]);
+    plotter.status = 'fired';
+    expect(resolveInboxItem(c.state, item.id, 'watch').message).toMatch(/moot/);
+  });
+
+  it('backing a pitcher creates an open protection promise', () => {
+    const c = setup();
+    const item = raise(c, 'pitch', [c.lead.id, c.workers[0].id], { secretId: null });
+    expect(item.options.map((o) => o.id)).toEqual(['neutral', 'back', 'warn']);
+    const loyalty = c.lead.loyalty;
+    expect(resolveInboxItem(c.state, item.id, 'back').ok).toBe(true);
+    expect(c.state.promises.filter((p) => p.personId === c.lead.id && p.kind === 'protection' && p.state === 'open')).toHaveLength(1);
+    expect(c.lead.loyalty).toBe(loyalty + 10);
+  });
+
+  it('backing a pitcher with a plot against the rival advances the plot', () => {
+    const c = setup();
+    c.state.plots[c.lead.id] = { targetId: c.workers[0].id, progress: 30, stage: 0 };
+    const item = raise(c, 'pitch', [c.lead.id, c.workers[0].id], { secretId: null });
+    resolveInboxItem(c.state, item.id, 'back');
+    expect(c.state.plots[c.lead.id].progress).toBe(50);
+  });
+
+  it('taking dirt reveals the secret and promises protection', () => {
+    const c = setup();
+    const rival = c.workers[0];
+    const sec = addSecret(c.state, rival.id, { kind: 'affair', description: 'Is seeing a client.', severity: 1 });
+    const item = raise(c, 'pitch', [c.lead.id, rival.id], { secretId: sec.id });
+    expect(item.data.secretId).toBe(sec.id);
+    const r = resolveInboxItem(c.state, item.id, 'dirt');
+    expect(r.message).toContain('Is seeing a client.');
+    expect(sec.revealed).toBe(true);
+    expect(rival.attentionReason).toBe('Exposed');
+    expect(c.state.promises.some((p) => p.personId === c.lead.id && p.kind === 'protection')).toBe(true);
+  });
+
+  it('dirt is not offered once the secret is out', () => {
+    const c = setup();
+    const sec = addSecret(c.state, c.workers[0].id, { kind: 'affair', description: 'Is seeing a client.', severity: 1 });
+    sec.revealed = true;
+    const item = raise(c, 'pitch', [c.lead.id, c.workers[0].id], { secretId: sec.id });
+    expect(item.options.some((o) => o.id === 'dirt')).toBe(false);
+  });
+
+  it('warning the rival sets back the pitcher\'s plot', () => {
+    const c = setup();
+    const rival = c.workers[0];
+    c.state.plots[c.lead.id] = { targetId: rival.id, progress: 50, stage: 1 };
+    const item = raise(c, 'pitch', [c.lead.id, rival.id], { secretId: null });
+    const loyalty = rival.loyalty;
+    expect(resolveInboxItem(c.state, item.id, 'warn').ok).toBe(true);
+    expect(c.state.plots[c.lead.id].progress).toBe(20);
+    expect(rival.loyalty).toBe(loyalty + 8);
+    expect(c.state.relations[rival.id][c.lead.id].opinion).toBeLessThan(0);
+    expect(c.state.relations[rival.id][c.lead.id].tag).toBe('rival');
   });
 });
 

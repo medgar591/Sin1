@@ -1,8 +1,9 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { useState } from 'preact/hooks';
-import type { GameState, OrgUnit, Person, PersonId, UnitId, UnitKind } from '../sim/types';
+import type { GameState, OrgUnit, Person, PersonId, Trait, UnitId, UnitKind } from '../sim/types';
 import { fullName, hasAttention, unit as getUnit, unitAncestry } from '../sim/org';
 import { closeSheet, openPerson, S } from './store';
+import { Portrait } from './portrait';
 
 export const KIND_LABEL: Record<UnitKind, string> = {
   executive: 'CEO',
@@ -153,7 +154,8 @@ export function PersonChip({ id }: { id: PersonId }) {
   if (!p) return null;
   return (
     <span class="chip" onClick={() => openPerson(id)}>
-      {fullName(p)}
+      <Portrait id={id} size={20} />
+      <span class="nm">{fullName(p)}</span>
     </span>
   );
 }
@@ -166,6 +168,45 @@ export function PersonLink({ id }: { id: PersonId }) {
       {fullName(p)}
     </a>
   );
+}
+
+/** Plain words for how a person feels about the CEO (-100..100). */
+export function stanceWord(opinion: number): string {
+  return opinion <= -50 ? 'Hostile' : opinion <= -15 ? 'Wary' : opinion < 15 ? 'Neutral' : opinion < 50 ? 'Warm' : 'Devoted';
+}
+
+/** CSS colour for a stance. */
+export function stanceColor(opinion: number): string {
+  return opinion <= -50 ? 'var(--red)' : opinion <= -15 ? 'var(--amber)' : opinion < 15 ? 'var(--dim)' : opinion < 50 ? 'var(--green)' : 'var(--cyan)';
+}
+
+export function stanceTone(opinion: number): 'red' | 'amber' | '' | 'green' | 'cyan' {
+  return opinion <= -50 ? 'red' : opinion <= -15 ? 'amber' : opinion < 15 ? '' : opinion < 50 ? 'green' : 'cyan';
+}
+
+export function loyaltyWord(loyalty: number): string {
+  return loyalty < 25 ? 'Fragile' : loyalty < 40 ? 'Shaky' : loyalty < 60 ? 'Steady' : loyalty < 80 ? 'Firm' : 'Devoted';
+}
+
+/** What a trait means, in one line. */
+export const TRAIT_TEXT: Record<Trait, string> = {
+  principled: 'Keeps to their values; hard to bribe or bully.',
+  paranoid: 'Suspects everyone; hard to win over.',
+  vain: 'Craves recognition and status.',
+  ruthless: 'Will step on others to get ahead.',
+  charming: 'Wins people over; makes allies easily.',
+  diligent: 'Works hard and reliably.',
+  lazy: 'Does the minimum unless pushed.',
+  gossip: 'Talks too much; secrets around them leak.',
+  cautious: 'Avoids risk; slow to act or scheme.',
+  reckless: 'Acts first; takes big risks.',
+  generous: 'Shares credit and looks after their people.',
+  petty: 'Holds grudges over small slights.',
+};
+
+/** How far along a campaign against someone is, in words. */
+export function plotStage(progress: number): string {
+  return progress < 40 ? 'whispering' : progress < 75 ? 'courting allies' : 'close to moving';
 }
 
 /** 0 fine, 1 amber, 2 red. */
@@ -222,6 +263,9 @@ export function Primer() {
       <p style={{ margin: '0 0 6px' }}>
         You can act on anyone, but acting on someone below your direct reports <b>goes around their bosses</b> and costs you their loyalty.
         People who are on your radar (a scandal, a breakthrough) are exempt for a while.
+      </p>
+      <p style={{ margin: '0 0 6px' }}>
+        People come to you: your inbox is who is waiting to see you. The Org tab's Chart shows who reports to whom; Players shows who matters.
       </p>
       <p style={{ margin: 0 }}>Unspent attention does not carry over. Tap <b>End month</b> when you are done; the board meets after every third month.</p>
     </div>

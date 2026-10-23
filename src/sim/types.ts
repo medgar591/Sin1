@@ -292,6 +292,8 @@ export interface InboxData {
   offer?: number;
   /** cliqueFormed: the faction. */
   cliqueId?: CliqueId;
+  /** pitch: the secret the pitcher offers on their rival. */
+  secretId?: string;
 }
 
 /** Handler key in the events registry: every incident kind, plus world events. */
@@ -305,6 +307,10 @@ export interface InboxItem {
   body: string;
   subjectIds: PersonId[];
   unitId: UnitId | null;
+  /** Who brings the matter to the CEO's office, if anyone in particular. */
+  speakerId?: PersonId | null;
+  /** What they say, in their own voice. */
+  quote?: string;
   options: InboxOption[];
   /** Option chosen by the player, once resolved. */
   resolution: string | null;
@@ -341,6 +347,10 @@ export type Incident = {
   | { kind: 'managerFiring' }
   /** A fixer job traced back to the company. */
   | { kind: 'fixerFallout'; what: string }
+  /** Someone warns the CEO about a plot: informant, plotter, plot target. */
+  | { kind: 'tipOff' }
+  /** An ambitious manager asks the CEO to back them against a rival: pitcher, rival. */
+  | { kind: 'pitch'; secretId: string | null }
 );
 
 export type IncidentKind = Incident['kind'];
@@ -402,6 +412,8 @@ export interface Motion {
 export interface BoardMeeting {
   month: Month;
   motions: Motion[];
+  /** How the directors' asks for the quarter just closed came out. */
+  asks?: { directorId: PersonId; text: string; met: boolean }[];
   /** Short summary of how the quarter was received. */
   summary: string;
 }
@@ -470,6 +482,29 @@ export interface GameState {
   unitSizes: Record<UnitId, number>;
   /** Month each empty division or function seat first went vacant. */
   seatVacantSince: Record<UnitId, number>;
+  /** What individual directors want delivered by the next board meeting. */
+  asks: BoardAsk[];
+  /** The officer who was passed over for the CEO's chair, if known (new games only). */
+  rivalId?: PersonId | null;
+}
+
+export type AskKind = 'revenueGrowth' | 'margin' | 'fillSeats' | 'costControl' | 'shakeUp' | 'noPurge';
+
+/** A director's demand for the quarter: met or missed at the next board meeting. */
+export interface BoardAsk {
+  id: string;
+  directorId: PersonId;
+  kind: AskKind;
+  /** What the director wants, in a sentence. */
+  text: string;
+  /** The number to reach (or, for limits, not exceed). */
+  target: number;
+  /** Last quarter's figure, for context. */
+  baseline: number;
+  madeMonth: Month;
+  /** Judged at the board meeting held at the close of this month. */
+  dueMonth: Month;
+  state: 'open' | 'met' | 'missed';
 }
 
 export interface Plot {
@@ -478,6 +513,8 @@ export interface Plot {
   progress: number;
   /** How many of the plot's milestones it has passed. */
   stage: number;
+  /** True once the CEO has heard about it (a tip-off, a probe, a report). */
+  known?: boolean;
 }
 
 export interface MacroCycle {
@@ -486,8 +523,16 @@ export interface MacroCycle {
   until: Month;
 }
 
+/** A moment with a person: what they said back to the CEO. */
+export interface Scene {
+  speakerId: PersonId;
+  line: string;
+}
+
 /** Result of a player action. Actions mutate state in place. */
 export interface ActionResult {
   ok: boolean;
   message: string;
+  /** Set when the action played out face to face. */
+  scene?: Scene;
 }

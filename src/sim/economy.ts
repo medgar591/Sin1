@@ -553,10 +553,19 @@ export function closeQuarter(state: GameState): QuarterResult {
   };
 }
 
+/** Estimated monthly revenue when there is no history yet. */
+export function estimatedMonthlyRevenue(state: GameState): number {
+  return sum(Object.values(state.divisions).map((d) => d.revenue));
+}
+
+/** Estimated monthly costs (divisions plus overhead) when there is no history yet. */
+export function estimatedMonthlyCosts(state: GameState): number {
+  return sum(Object.values(state.divisions).map((d) => d.costs)) + overheadCost(state);
+}
+
 /** Estimated monthly profit when there is no history yet. */
-function estimatedMonthlyProfit(state: GameState): number {
-  const divs = Object.values(state.divisions);
-  return sum(divs.map((d) => d.revenue - d.costs)) - overheadCost(state);
+export function estimatedMonthlyProfit(state: GameState): number {
+  return estimatedMonthlyRevenue(state) - estimatedMonthlyCosts(state);
 }
 
 /** The default guidance is the run-rate less this much caution. */
@@ -574,4 +583,44 @@ export function suggestedGuidance(state: GameState): number {
   const monthly = recent.length ? sum(recent.map((r) => r.profit)) / recent.length : estimatedMonthlyProfit(state);
   const target = monthly * 3 * (monthly >= 0 ? SUGGEST_CAUTION : 2 - SUGGEST_CAUTION);
   return Math.round(target / 50_000) * 50_000;
+}
+
+export interface QuarterOutlook {
+  /** The current quarter, e.g. "Q2 2091". */
+  label: string;
+  /** Months of the quarter still to be played, counting the one being played now. */
+  monthsLeft: number;
+  /** Months of the quarter already on the books. */
+  monthsIn: number;
+  profitSoFar: number;
+  /** Profit so far plus the current monthly run-rate for the months left. */
+  projected: number;
+  guidance: number | null;
+  /** What the board expects this quarter to deliver, if it has a bar. */
+  expectation: number | null;
+  /** The month whose close brings the board meeting. */
+  boardMonth: number;
+}
+
+/** Where the current quarter stands: what is booked, where it is heading, and the bars it will be judged against. */
+export function quarterOutlook(state: GameState): QuarterOutlook {
+  const hist = state.company.history;
+  const start = Math.floor(Math.max(0, state.month) / 3) * 3;
+  const boardMonth = start + 2;
+  const booked = hist.filter((r) => r.month >= start && r.month <= boardMonth);
+  const monthsIn = Math.min(3, booked.length);
+  const monthsLeft = 3 - monthsIn;
+  const profitSoFar = sum(booked.map((r) => r.profit));
+  const pool = booked.length ? booked : hist.slice(-3);
+  const rate = pool.length ? sum(pool.map((r) => r.profit)) / pool.length : estimatedMonthlyProfit(state);
+  return {
+    label: quarterLabel(state.month),
+    monthsLeft,
+    monthsIn,
+    profitSoFar,
+    projected: Math.round(profitSoFar + rate * monthsLeft),
+    guidance: state.company.guidance,
+    expectation: boardExpectation(state, hist.filter((r) => r.month < start)),
+    boardMonth,
+  };
 }
