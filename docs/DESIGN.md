@@ -33,7 +33,7 @@ decision.
 
 - A zaibatsu with **3 divisions** in different industries, each with 100–150
   people, plus small corporate-function teams under the C-suite.
-- A zaibatsu's **divisions** are its business lines. Each has
+- Each division is a business line with its own
   budget, revenue, costs, growth, morale and output.
 - Corp-level numbers: cash, quarterly profit, an abstract share price driven
   by profit against guidance, and **board confidence**.
