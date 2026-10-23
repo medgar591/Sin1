@@ -37,6 +37,14 @@ decision.
   budget, revenue, costs, growth, morale and output.
 - Corp-level numbers: cash, quarterly profit, an abstract share price driven
   by profit against guidance, and **board confidence**.
+- **The company has a past.** You take the chair in January 2090. The game
+  generates the company in January 2085 and runs it for five years before
+  your first screen: 2085-2088 unobserved, so relationships, staffing and
+  tenures have settled, then all of 2089 under your predecessor, with four
+  closed quarters, guidance, paper board meetings and three bonus pools paid
+  on their word. Only 2089 is on the record (charts, log, board history);
+  people keep the milestones of the earlier years (hires, promotions,
+  mentors, rivalries) and have aged the years they have been here.
 
 ## The hierarchy
 
@@ -138,10 +146,13 @@ units, according to their own loyalties and judgement.
 
 The player should always know what they are trying to do this month.
 
-- **The opening briefing.** On day one the Chief of Staff introduces the
-  board, the officers (and that the COO oversees every division), the
-  officer who was passed over for the chair, and what the board expects.
-- **The agenda.** The dashboard opens with the Chief of Staff's list of what
+- **The opening briefing.** On day one the CEO's personal secretary, who
+  kept the predecessor's diary and stays on for the new chair, introduces the
+  predecessor's last year, the board, the officers (and that the COO
+  oversees every division), the officer who was passed over for the chair,
+  and what the board expects. The voice is personal, discreet and observant,
+  a little protective of the new boss, and played straight.
+- **The agenda.** The dashboard opens with the secretary's list of what
   needs the CEO now: plots against you, people waiting, empty seats, asks
   that are off track, promises falling due, directors turning hostile.
 - **The quarter.** Profit so far and projected, against the guidance you

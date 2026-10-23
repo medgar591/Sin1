@@ -2,7 +2,7 @@
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import type { GameState, PersonId } from '../sim/types';
-import { chiefOfStaff, formatZuzu, fullName, isActive, monthLabel } from '../sim/org';
+import { secretary, formatZuzu, fullName, isActive, monthLabel } from '../sim/org';
 import { askProgress } from '../sim/asks';
 import { directorSupport } from '../sim/board';
 import { quarterOutlook, suggestedGuidance, type QuarterOutlook } from '../sim/economy';
@@ -126,15 +126,15 @@ function AgendaRow({ it }: { it: AgendaItem }) {
 
 export function AgendaCard() {
   const g = game();
-  const cos = chiefOfStaff(g);
+  const sec = secretary(g);
   const items = buildAgenda(g);
   return (
     <div class="card" style={{ padding: '10px 0 0', overflow: 'hidden' }}>
       <div class="row" style={{ padding: '0 12px 8px' }}>
-        {cos ? <Portrait id={cos.id} size={32} ring="var(--cyan)" onClick={() => openPerson(cos.id)} /> : null}
+        {sec ? <Portrait id={sec.id} size={32} ring="var(--cyan)" onClick={() => openPerson(sec.id)} /> : null}
         <div class="grow">
-          <div class="label cyan">From your chief of staff</div>
-          <div class="small dim">{cos ? `${fullName(cos)} · ` : ''}What needs you, {monthLabel(g.month)}</div>
+          <div class="label cyan">From your secretary</div>
+          <div class="small dim">{sec ? `${fullName(sec)} · ` : ''}What needs you, {monthLabel(g.month)}</div>
         </div>
       </div>
       {items.length === 0 ? (

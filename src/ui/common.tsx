@@ -258,7 +258,7 @@ export function Primer() {
     <div class="small" style={{ lineHeight: 1.5 }}>
       <p style={{ margin: '0 0 6px' }}>
         <b>Your job:</b> hit the guidance you announce, satisfy the directors' quarterly asks, and keep board confidence above 30.
-        Your chief of staff's agenda on the dashboard lists what needs you.
+        Your secretary's agenda on the dashboard lists what needs you.
       </p>
       <p style={{ margin: '0 0 6px' }}>
         Each month you have <b>{n} attention</b> (the dots at the top). Meeting, hiring, firing, promoting, demoting, reassigning,

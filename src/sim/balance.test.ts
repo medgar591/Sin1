@@ -67,8 +67,9 @@ function play(seed: number, bot: Bot, months = MONTHS): Outcome {
     staffMin,
     staffMax,
     inboxPerMonth: items / ran,
-    quits: people.filter((p) => p.status === 'quit' || p.status === 'defected').length,
-    fires: people.filter((p) => p.status === 'fired').length,
+    // Leavers on the player's watch only: the years before the handover left people behind too.
+    quits: people.filter((p) => (p.status === 'quit' || p.status === 'defected') && (p.leftMonth ?? -1) >= 0).length,
+    fires: people.filter((p) => p.status === 'fired' && (p.leftMonth ?? -1) >= 0).length,
     motionsFailed: state.boardMeetings.flatMap((m) => m.motions).filter((m) => m.kind === 'noConfidence' && !m.passed).length,
   };
 }

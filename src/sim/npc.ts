@@ -1062,9 +1062,12 @@ function pitch(ctx: Ctx, p: Person): void {
 
 // ------------------------------------------------------------ leaving
 
+/** While a game is being generated (before month 0) the passed-over rival and the CEO's own office stay put, so the opening briefing has its cast. */
+const stayingForHandover = (s: GameState, p: Person): boolean => s.month < 0 && (p.id === s.rivalId || p.unitId === s.rootUnitId);
+
 function leaving(ctx: Ctx, p: Person): void {
   const s = ctx.s;
-  if (tenure(ctx, p) < 3) return;
+  if (tenure(ctx, p) < 3 || stayingForHandover(s, p)) return;
   if (p.satisfaction >= T.quitSatisfaction) {
     // Ordinary attrition: rival corps hire people away even from a happy company.
     if (!chance(s, T.baseQuit * (1 + Math.max(0, 55 - p.satisfaction) / 25) * (0.7 + p.greed / 100))) return;

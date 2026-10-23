@@ -1,4 +1,4 @@
-// The opening briefing: the chief of staff welcomes the new CEO and says what the job is.
+// The opening briefing: the personal secretary welcomes the new CEO and says what the job is.
 import { useEffect } from 'preact/hooks';
 import { openingBriefing } from '../sim/briefing';
 import { fullName } from '../sim/org';
@@ -23,7 +23,7 @@ export function IntroSheet() {
   // However the sheet is dismissed (button, Close, scrim), it has been seen.
   useEffect(() => () => markIntroSeen(g.seed), [g.seed]);
   return (
-    <Sheet title="Opening briefing">
+    <Sheet title="Morning briefing">
       {sp && (
         <div class="phead" style={{ paddingBottom: '8px' }}>
           <Portrait id={sp.id} size={72} ring="var(--cyan)" />

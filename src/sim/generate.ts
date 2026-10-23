@@ -128,10 +128,20 @@ const SECRET_SCALE = 0.2;
 
 /** The months the company runs under the predecessor before the player takes over: all of 2089, four closed quarters. */
 const PREQUEL_MONTHS = 12;
+/** Before 2089 the company runs unobserved for four more years (2085-2088) so it settles; none of it reaches the player. */
+const BURN_IN_MONTHS = 48;
+/** The month the generated cohort joins the world: Jan 2085, five years before the player takes the chair. */
+const WORLD_START = -(BURN_IN_MONTHS + PREQUEL_MONTHS);
+/** Life events older than the reported year survive the burn-in only if they are career milestones or where a relationship began. */
+const KEPT_LIFE_EVENTS = new Set(['hired', 'promoted', 'demoted', 'transferred', 'mentor', 'rival', 'feud']);
+/** Markets pushed off normal by the burn-in's news close this share of the gap before 2089 opens. */
+const REANCHOR_MARKET_PULL = 0.5;
 /** The predecessor's guidance for each later quarter is the run-rate suggestion times a draw from this range: sometimes bold, sometimes cautious. */
-const PREDECESSOR_GUIDE: [number, number] = [0.97, 1.07];
+const PREDECESSOR_GUIDE: [number, number] = [1, 1.16];
 const PREDECESSOR_AGE: [number, number] = [58, 66];
-const PREDECESSOR_TENURE_YEARS: [number, number] = [6, 12];
+const PREDECESSOR_TENURE_YEARS: [number, number] = [7, 14];
+/** The personal secretary is a long-serving hand who was already at the predecessor's door. */
+const SECRETARY_AGE: [number, number] = [45, 60];
 
 // ---------------------------------------------------------------- people
 
@@ -255,7 +265,8 @@ export function createPerson(state: GameState, opts: CreatePersonOptions): Perso
     satisfaction: randInt(state, 45, 80),
     performance: num(state, q, 8),
     stockOptions: 0,
-    hiredMonth: -Math.max(1, tenure),
+    // Generated people are on the books from the start of the burn-in, so their tenure counts back from there.
+    hiredMonth: WORLD_START - Math.max(1, tenure),
     status: 'active',
     leftMonth: null,
     fate: null,
@@ -436,7 +447,7 @@ function buildDivision(state: GameState, opsId: UnitId, industry: Industry, name
 
   // A staffer or two working directly for the division head.
   const aides = chance(state, 0.5) ? randInt(state, 1, 2) : 0;
-  addWorkers(state, div, aides, ['Executive Assistant', 'Chief of Staff', 'Business Analyst']);
+  addWorkers(state, div, aides, ['Executive Assistant', 'Strategy Analyst', 'Business Analyst']);
   count += aides;
 
   const teams: OrgUnit[] = [];
@@ -809,13 +820,74 @@ function payPredecessorBonuses(state: GameState, predecessor: Person): void {
 }
 
 /**
- * Runs the company for all of 2089 (Jan to Dec) under the predecessor, so the
- * player inherits real history: twelve monthly records, four closed quarters
- * with share price moves, and an NPC world that has had a year of hires,
- * departures and feuds. Each quarter the predecessor guides and the board
- * meets on paper (no motions, no asks); the first three bonus pools are paid
- * out, the last is left for the player. Nothing from this era reaches the
- * inbox, and nothing is credited to the player.
+ * Runs the company unobserved for 2085-2088 so it has settled before the year
+ * the player hears about: relationships have formed, staffing has found its
+ * level, the dead weight has been let go. The people live fully (hires, feuds,
+ * departures, plots) but nothing is closed, guided or reported, and the inbox
+ * stays empty. reanchor() then wipes the burn-in's books and log.
+ */
+function runBurnIn(state: GameState): void {
+  const personalCash = state.player.personalCash;
+  for (let m = WORLD_START; m < -PREQUEL_MONTHS; m++) {
+    state.month = m;
+    if (m > WORLD_START) runWorldNews(state);
+    runNpcMonth(state);
+    computeOutputs(state);
+    runEconomyMonth(state);
+    state.incidents = [];
+  }
+  state.player.personalCash = personalCash;
+}
+
+/**
+ * Opens 2089 as if the company were new on the books again. Five years of
+ * compounding revenue against flat costs would otherwise open with absurd
+ * margins, so the cash, share price and board confidence go back to their
+ * starting values and the divisions are recalibrated (the first month's books
+ * do it, because the revenue scale is zero) on the settled organisation.
+ * Records of the burn-in leave with it; people keep only the milestones.
+ */
+function reanchor(state: GameState, freshConfidence: number): void {
+  state.company.history = [];
+  state.log = state.log.filter((l) => l.month >= -PREQUEL_MONTHS);
+  state.company.cash = START_CASH;
+  state.company.sharePrice = START_SHARE_PRICE;
+  state.company.boardConfidence = freshConfidence;
+  state.company.guidance = null;
+  state.company.bonusPool = 0;
+  state.macro = null;
+  for (const d of Object.values(state.divisions)) {
+    d.market = Math.round((1 + (d.market - 1) * (1 - REANCHOR_MARKET_PULL)) * 100) / 100;
+    d.scale = 0;
+  }
+  for (const p of Object.values(state.people)) {
+    p.history = p.history.filter((e) => e.month >= -PREQUEL_MONTHS || KEPT_LIFE_EVENTS.has(e.kind));
+  }
+}
+
+/**
+ * People do not age while the sim runs, so the years elapsed are added at the
+ * handover: whole years since the cohort joined the world (Jan 2085) or since a
+ * later hire arrived, until they left or the player took over. The player and
+ * the predecessor were given their ages for the handover itself.
+ */
+function ageTheCast(state: GameState, cohort: Set<PersonId>, fixed: PersonId[]): void {
+  for (const p of Object.values(state.people)) {
+    if (fixed.includes(p.id)) continue;
+    const joined = cohort.has(p.id) ? WORLD_START : p.hiredMonth;
+    p.age += Math.max(0, Math.floor(((p.leftMonth ?? 0) - joined) / 12));
+  }
+}
+
+/**
+ * Runs the company for all of 2089 (Jan to Dec) under the predecessor, after
+ * the burn-in has settled it, so the player inherits real history: twelve
+ * monthly records, four closed quarters with share price moves, and an NPC
+ * world that has had a year of hires, departures and feuds. Each quarter the
+ * predecessor guides and the board meets on paper (no motions, no asks); the
+ * first three bonus pools are paid out, the last is left for the player.
+ * Nothing from this era reaches the inbox, and nothing is credited to the
+ * player.
  */
 function runPrequel(state: GameState, player: Person, predecessor: Person): { quarters: QuarterResult[]; startSharePrice: number } {
   // The CEO's pay and the dividend go to whoever holds the chair and the stake: not the player yet.
@@ -998,14 +1070,11 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   predecessor.salary = ceo.salary;
   seatLead(state, root.id, predecessor.id);
 
-  const chief = createPerson(state, { role: 'worker', quality: 62 });
-  chief.title = 'Chief of Staff';
-  placeAsMember(state, chief.id, root.id);
-  if (chance(state, 0.6)) {
-    const assistant = createPerson(state, { role: 'worker', quality: 55 });
-    assistant.title = 'Executive Assistant';
-    placeAsMember(state, assistant.id, root.id);
-  }
+  // The personal secretary came with the chair: they kept the predecessor's diary and stay on for the new CEO.
+  const secretary = createPerson(state, { role: 'worker', quality: 62, age: randInt(state, ...SECRETARY_AGE), traits: ['cautious'] });
+  secretary.title = 'Personal Secretary';
+  secretary.hiredMonth = Math.min(predecessor.hiredMonth + randInt(state, 0, 36), WORLD_START - 1);
+  placeAsMember(state, secretary.id, root.id);
 
   // C-suite functions.
   const fnUnits = FUNCTION_DEFS.map((def) => buildFunctionUnit(state, root.id, def));
@@ -1057,8 +1126,12 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   assignSecrets(state, staff);
   buildCliques(state, staff, antagonist);
 
+  const cohort = new Set(Object.keys(state.people));
+  runBurnIn(state);
+  reanchor(state, freshConfidence);
   const year = runPrequel(state, ceo, predecessor);
   handOver(state, ceo, predecessor, tenureYears, year, freshConfidence);
+  ageTheCast(state, cohort, [ceo.id, predecessor.id]);
   issueAsks(state);
   return state;
 }

@@ -27,20 +27,26 @@ export function Title() {
   const [text, setText] = useState('');
   const [err, setErr] = useState('');
   const [saved, setSaved] = useState(hasSave);
+  const [busy, setBusy] = useState(false);
 
   const start = () => {
     setErr('');
-    try {
-      const g = generateGame(hashSeed(seed), {
-        companyName: company.trim() || 'Unnamed Combine',
-        playerFirstName: first.trim() || 'Alex',
-        playerLastName: last.trim() || 'Morrow',
-        playerPronouns: pro,
-      });
-      startGame(g);
-    } catch (e) {
-      setErr(errMsg(e));
-    }
+    setBusy(true);
+    // Generating a company runs five years of it: let the message paint before the work starts.
+    setTimeout(() => {
+      try {
+        const g = generateGame(hashSeed(seed), {
+          companyName: company.trim() || 'Unnamed Combine',
+          playerFirstName: first.trim() || 'Alex',
+          playerLastName: last.trim() || 'Morrow',
+          playerPronouns: pro,
+        });
+        startGame(g);
+      } catch (e) {
+        setErr(errMsg(e));
+        setBusy(false);
+      }
+    }, 30);
   };
 
   return (
@@ -105,8 +111,10 @@ export function Title() {
             <input type="text" value={seed} placeholder="random" onInput={(e) => setSeed(e.currentTarget.value)} />
           </div>
           {err && <div class="warnbox">{err}</div>}
-          <button class="btn primary block" onClick={start}>Take the chair</button>
-          <button class="btn block" onClick={() => setView('main')}>Back</button>
+          <button class="btn primary block" disabled={busy} onClick={start}>
+            {busy ? 'Reviewing five years of company records…' : 'Take the chair'}
+          </button>
+          <button class="btn block" disabled={busy} onClick={() => setView('main')}>Back</button>
         </div>
       )}
 

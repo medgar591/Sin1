@@ -56,7 +56,7 @@ function Settings() {
         <div class="label" style={{ marginBottom: '6px' }}>How a month works</div>
         <Primer />
       </div>
-      <button class="btn block" onClick={() => openSheet({ k: 'intro' })}>Replay the opening briefing</button>
+      <button class="btn block" onClick={() => openSheet({ k: 'intro' })}>Replay the morning briefing</button>
       <div class="card stack">
         <div class="label">Export save</div>
         <Btn cls="block" onClick={async () => {

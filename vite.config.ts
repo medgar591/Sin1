@@ -29,5 +29,7 @@ export default defineConfig({
   plugins: [preact(), swPrecache()],
   test: {
     include: ['src/**/*.test.ts'],
+    // Generating a company runs five years of it; suites that make several need more than the 5 s default on a slow box.
+    testTimeout: 20_000,
   },
 });

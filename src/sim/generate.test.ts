@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createPerson, generateGame, unitName, type NewGameOptions } from './generate';
 import { marketSalary, roleForUnitKind, salaryRange } from './roles';
-import { activeStaff, bossOf, isQuarterEnd, monthLabel, quarterLabel } from './org';
+import { activeStaff, bossOf, isQuarterEnd, monthLabel, quarterLabel, secretary } from './org';
 import { boardExpectation, EXPECT_QOQ, EXPECT_YOY, quarterOutlook } from './economy';
 import { emptyState } from './testkit';
 
@@ -23,8 +23,8 @@ describe('generateGame', () => {
     generateGame(1, OPTS);
     const t = performance.now();
     generateGame(2, OPTS);
-    // About 90 ms alone (twelve simulated months); the cap leaves room for a loaded CI box or a slow phone's share of it.
-    expect(performance.now() - t).toBeLessThan(500);
+    // About 200 ms alone (sixty simulated months); the cap leaves room for a loaded CI box or a slow phone's share of it.
+    expect(performance.now() - t).toBeLessThan(1000);
   });
 
   it('has sensible headcount and divisions', () => {
@@ -41,14 +41,14 @@ describe('generateGame', () => {
         const u = s.units[d.unitId];
         expect(u.parentId).toBe(ops.id);
         const members = Object.values(s.people).filter((p) => p.unitId && s.units[p.unitId].divisionId === u.id);
-        // Built at 100-150; a year of resignations and hires can thin or fatten a division a little.
+        // Built at 100-150; five years of resignations and hires can thin or fatten a division a little.
         expect(members.length).toBeGreaterThanOrEqual(90);
         expect(members.length).toBeLessThanOrEqual(150);
         expect(bossOf(s, u.leadId!)).toBe(ops.leadId);
       }
       expect(s.directors.length).toBeGreaterThanOrEqual(5);
       expect(s.directors.length).toBeLessThanOrEqual(7);
-      // A year of dividends and wages has run since the opening 20M.
+      // The books were reset to the opening 20M when 2089 began; a year of dividends and wages has run since.
       expect(s.company.cash).toBeGreaterThan(10_000_000);
       expect(s.company.cash).toBeLessThan(30_000_000);
     }
@@ -103,7 +103,7 @@ describe('generateGame', () => {
     for (const seed of SEEDS) {
       const s = generateGame(seed, OPTS);
       const cliques = Object.values(s.cliques);
-      // Three to five at the start; a year of company life forms new ones faster than old ones thin out (4 to 12 over 40 seeds).
+      // Three to five at the start; five years of company life form new ones faster than old ones thin out.
       expect(cliques.length).toBeGreaterThanOrEqual(3);
       expect(cliques.length).toBeLessThanOrEqual(14);
       for (const c of cliques) {
@@ -152,9 +152,14 @@ describe('generateGame', () => {
   it('keeps salaries in role ranges', () => {
     const s = generateGame(11, OPTS);
     for (const p of Object.values(s.people)) {
+      // Five years of moves can leave someone outside the band of their present seat (a lead pulled into a protector's team keeps the pay).
+      const moved = p.history.some((e) => ['promoted', 'demoted', 'transferred'].includes(e.kind));
       const [lo, hi] = salaryRange(p.role);
-      expect(p.salary).toBeGreaterThanOrEqual(lo);
-      expect(p.salary).toBeLessThanOrEqual(hi);
+      if (moved) expect(p.salary).toBeGreaterThan(0);
+      else {
+        expect(p.salary).toBeGreaterThanOrEqual(lo);
+        expect(p.salary).toBeLessThanOrEqual(hi);
+      }
       expect(p.age).toBeGreaterThanOrEqual(22);
     }
     const workers = activeStaff(s).filter((p) => p.role === 'worker');
@@ -200,7 +205,8 @@ describe('the year before the game', () => {
         expect(s.log.filter((l) => l.month === meeting.month && l.text.startsWith(`${q} closed`))).toHaveLength(1);
       });
       expect(s.log.filter((l) => /^Q\d 2089 closed/.test(l.text))).toHaveLength(4);
-      expect(s.log.every((l) => l.month <= 0)).toBe(true);
+      // Nothing from the burn-in years is on the log: it opens in January 2089.
+      expect(s.log.every((l) => l.month >= -12 && l.month <= 0)).toBe(true);
       // Budgets and wages are marked up from the first January of the game, not inside the prequel.
       expect(s.log.some((l) => l.month < 0 && l.text.startsWith('Budgets marked up'))).toBe(false);
       // Calm times: no business cycle before the game.
@@ -215,7 +221,10 @@ describe('the year before the game', () => {
       expect(old.unitId).toBeNull();
       expect(old.fate).toMatch(/^Retired as CEO in Dec 2089 after \d+ years\.$/);
       expect(old.age).toBeGreaterThanOrEqual(58);
-      expect(-old.hiredMonth).toBeGreaterThanOrEqual(6 * 12);
+      // A long-serving CEO: more than the five years the company has been run for.
+      expect(-old.hiredMonth).toBeGreaterThanOrEqual(7 * 12);
+      expect(-old.hiredMonth).toBeLessThan(15 * 12);
+      expect(old.age).toBeLessThanOrEqual(66);
       expect(s.boardMeetings[3].summary).toContain(`${old.firstName} ${old.lastName}`);
       const root = s.units[s.rootUnitId];
       expect(root.leadId).toBe(s.player.personId);
@@ -289,7 +298,8 @@ describe('the year before the game', () => {
     for (const seed of SEEDS) {
       const s = generateGame(seed, OPTS);
       hires += s.log.filter((l) => l.month < 0 && / hired /.test(l.text)).length;
-      departures += Object.values(s.people).filter((p) => p.leftMonth !== null && p.leftMonth < 0 && p.id !== s.prequel!.predecessorId).length;
+      // Leavers of 2089 alone; the burn-in's are counted in the five-year suite below.
+      departures += Object.values(s.people).filter((p) => p.leftMonth !== null && p.leftMonth >= -12 && p.leftMonth < 0 && p.id !== s.prequel!.predecessorId).length;
       // A whole year of company life, not just December's.
       const early = s.log.filter((l) => l.month >= -12 && l.month <= -10);
       const late = s.log.filter((l) => l.month >= -3 && l.month < 0);
@@ -321,6 +331,154 @@ describe('the year before the game', () => {
       expect(s.company.bonusPool).toBeGreaterThan(0);
       expect(s.company.bonusPool).toBeLessThan(s.prequel!.profit * 0.2);
       expect(s.log.some((l) => l.month === 0 && l.text.includes('Q4 2089 bonus pool') && l.text.includes('unallocated'))).toBe(true);
+    }
+  });
+});
+
+const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+/** Profit of the three months starting `from` months into the 2089 records. */
+const quarterProfit = (s: ReturnType<typeof generateGame>, from: number): number =>
+  s.company.history.slice(from, from + 3).reduce((a, r) => a + r.profit, 0);
+
+describe('the five years before the game', () => {
+  it('puts the whole cohort on the books before the burn-in began', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      const player = s.people[s.player.personId];
+      for (const p of Object.values(s.people)) {
+        if (p.id === player.id) continue;
+        const hired = p.history.find((e) => e.kind === 'hired');
+        // Anyone hired in the burn-in or the prequel says so (and joined after Jan 2085); everyone else was there from Jan 2085 or before.
+        if (hired) {
+          expect(p.hiredMonth).toBe(hired.month);
+          expect(p.hiredMonth).toBeGreaterThan(-60);
+        } else {
+          expect(p.hiredMonth).toBeLessThanOrEqual(-61);
+        }
+      }
+    }
+  });
+
+  it('keeps ages and tenures consistent after the years that passed', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      const player = s.people[s.player.personId];
+      const old = s.people[s.prequel!.predecessorId];
+      // Directors were seated in 2085 and have had five birthdays since (their roles start at 55 and 48).
+      const chair = s.people[s.directors[0].personId];
+      expect(chair.age).toBeGreaterThanOrEqual(60);
+      for (const d of s.directors) expect(s.people[d.personId].age).toBeGreaterThanOrEqual(53);
+      // The player and the predecessor were given their ages for the handover itself.
+      expect(player.age).toBeLessThanOrEqual(60);
+      expect(old.age).toBeGreaterThanOrEqual(58);
+      expect(old.age).toBeLessThanOrEqual(66);
+      for (const p of Object.values(s.people)) {
+        if (p.id === player.id || p.id === old.id) continue;
+        // Nobody has worked here longer than they have been an adult (give or take the year that whole-year ageing rounds away).
+        const years = ((p.leftMonth ?? 0) - p.hiredMonth) / 12;
+        expect(years).toBeLessThanOrEqual(p.age - 21 + 1);
+      }
+    }
+  });
+
+  it('leaves no trace of 2085-2088 in the books, the log or the player\'s desk', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      expect(s.company.history).toHaveLength(12);
+      expect(s.company.history[0].month).toBe(-12);
+      expect(s.log.some((l) => l.month < -12)).toBe(false);
+      expect(s.boardMeetings).toHaveLength(4);
+      expect(s.inbox).toHaveLength(0);
+      expect(s.incidents).toHaveLength(0);
+      expect(s.promises).toHaveLength(0);
+      expect(s.fixerJobs).toHaveLength(0);
+      expect(s.macro).toBeNull();
+      for (const p of Object.values(s.people)) expect(p.history.some((e) => e.byPlayer)).toBe(false);
+    }
+  });
+
+  it('opens 2089 on the starting books, calibrated to the settled company', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      const first = s.company.history[0];
+      // Cash, price and confidence went back to their opening values (one month's profit later).
+      expect(first.cash).toBeGreaterThan(19_000_000);
+      expect(first.cash).toBeLessThan(22_000_000);
+      expect(first.sharePrice).toBe(40);
+      // (A month of plotting against the predecessor may already have shaved a point.)
+      expect(first.boardConfidence).toBeGreaterThanOrEqual(50);
+      expect(first.boardConfidence).toBeLessThanOrEqual(65);
+      // Five years of compounding revenue against flat costs would open near a 40% margin; recalibrated, it is a healthy one.
+      const margin = first.profit / first.revenue;
+      expect(margin).toBeGreaterThan(0.1);
+      expect(margin).toBeLessThan(0.3);
+    }
+  });
+
+  it('shows 2089 as one year of growth, not a company still settling', () => {
+    const growth = SEEDS.map((seed) => {
+      const s = generateGame(seed, OPTS);
+      return quarterProfit(s, 9) / quarterProfit(s, 0) - 1;
+    });
+    // The economy has real operating leverage (revenue grows about half a percent a month against costs that are flat until 2091), so the year is
+    // not flat: around +30% from Q1 to Q4, much the same as the player's own first year. It must not run away, nor shrink.
+    expect(median(growth)).toBeLessThan(0.5);
+    expect(median(growth)).toBeGreaterThan(0.05);
+    for (const g of growth) {
+      expect(g).toBeLessThan(0.9);
+      expect(g).toBeGreaterThan(-0.1);
+    }
+  });
+
+  it('trims the burn-in to career milestones and where relationships began', () => {
+    const career = new Set(['hired', 'promoted', 'demoted', 'transferred', 'mentor', 'rival', 'feud']);
+    let kept = 0;
+    let recentOther = 0;
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      for (const p of Object.values(s.people)) {
+        for (const e of p.history) {
+          if (e.month < -12) {
+            expect(career.has(e.kind)).toBe(true);
+            kept++;
+          } else if (!career.has(e.kind)) recentOther++;
+        }
+        // Still in order, so the time-windowed lookups in the NPC logic read them correctly.
+        for (let i = 1; i < p.history.length; i++) expect(p.history[i].month).toBeGreaterThanOrEqual(p.history[i - 1].month);
+      }
+    }
+    expect(kept).toBeGreaterThan(SEEDS.length * 50);
+    // 2089 itself keeps everything: raises, bonuses, warnings and the rest.
+    expect(recentOther).toBeGreaterThan(SEEDS.length * 50);
+  });
+
+  it('lets the burn-in churn the company: people came and went before 2089', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      const early = Object.values(s.people).filter((p) => p.leftMonth !== null && p.leftMonth < -12 && p.id !== s.prequel!.predecessorId);
+      expect(early.length).toBeGreaterThan(20);
+      expect(Object.values(s.people).filter((p) => p.hiredMonth > -60 && p.hiredMonth < -12).length).toBeGreaterThan(20);
+      // The passed-over rival and the CEO's office were still there to meet the new CEO.
+      expect(s.people[s.rivalId!].status).toBe('active');
+    }
+  });
+
+  it('keeps a personal secretary in the CEO\'s office, who served the predecessor', () => {
+    for (const seed of SEEDS) {
+      const s = generateGame(seed, OPTS);
+      const root = s.units[s.rootUnitId];
+      const sec = secretary(s)!;
+      expect(sec.title).toBe('Personal Secretary');
+      expect(sec.status).toBe('active');
+      expect(root.memberIds).toEqual([sec.id]);
+      expect(bossOf(s, sec.id)).toBe(s.player.personId);
+      // Long-serving: there since before the company's records begin, and no longer than the predecessor.
+      const old = s.people[s.prequel!.predecessorId];
+      expect(sec.hiredMonth).toBeLessThanOrEqual(-61);
+      expect(sec.hiredMonth).toBeGreaterThanOrEqual(old.hiredMonth);
+      expect(sec.age).toBeGreaterThanOrEqual(50);
+      expect(sec.age).toBeLessThanOrEqual(65);
+      expect(Object.values(s.people).some((p) => p.title === 'Chief of Staff')).toBe(false);
     }
   });
 });

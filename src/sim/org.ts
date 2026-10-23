@@ -356,10 +356,19 @@ export function functionHead(state: GameState, kind: FunctionKind): Person | nul
   return lead && isActive(lead) ? lead : null;
 }
 
-/** The CEO's chief of staff (or, failing that, whoever else works in the CEO's office). */
-export function chiefOfStaff(state: GameState): Person | null {
+/**
+ * The CEO's personal secretary: whoever keeps the chair's diary and tells the
+ * CEO what needs them. Games saved before the secretary existed had a chief of
+ * staff in that role; failing both, whoever else works in the CEO's office.
+ */
+export function secretary(state: GameState): Person | null {
   const root = state.units[state.rootUnitId];
   if (!root) return null;
   const staff = root.memberIds.map((id) => state.people[id]).filter((p): p is Person => !!p && isActive(p));
-  return staff.find((p) => p.title === 'Chief of Staff') ?? staff[0] ?? null;
+  return (
+    staff.find((p) => p.title === 'Personal Secretary') ??
+    staff.find((p) => p.title === 'Chief of Staff') ??
+    staff[0] ??
+    null
+  );
 }

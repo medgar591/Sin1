@@ -26,7 +26,6 @@ import {
   be,
   bossOf,
   chainOfCommand,
-  chiefOfStaff,
   formatZuzu,
   fullName,
   functionHead,
@@ -45,6 +44,7 @@ import {
   removeFromCompany,
   revealSecrets,
   seatLead,
+  secretary,
   setTag,
   unit,
   verb,
@@ -588,7 +588,7 @@ const voices: Partial<Record<InboxKind, Voice>> = {
   seatVacancy: (state, d) => {
     const u = d.unitId ? state.units[d.unitId] : undefined;
     return {
-      speaker: chiefOfStaff(state),
+      speaker: secretary(state),
       lines: [
         `${u?.name ?? 'That unit'} has nobody at the top. The floor is filling the gap with rumours; you should pick someone.`,
         `Three people think they should run ${u?.name ?? 'it'}. Each of them has someone lobbying for them.`,
@@ -613,7 +613,7 @@ const voices: Partial<Record<InboxKind, Voice>> = {
     if (!s || !t) return null;
     if (t.id === state.player.personId) {
       return {
-        speaker: chiefOfStaff(state),
+        speaker: secretary(state),
         lines: [
           `You should hear this from me first: ${fullName(s)} is moving against you. I don't know how far it has gone.`,
           `${fullName(s)} has been having very friendly lunches with directors. Your name comes up.`,
@@ -645,7 +645,7 @@ const voices: Partial<Record<InboxKind, Voice>> = {
   scandal: (state, d) => {
     const p = at(state, d, 0);
     return p && {
-      speaker: functionHead(state, 'legal') ?? chiefOfStaff(state),
+      speaker: functionHead(state, 'legal') ?? secretary(state),
       lines: [`The ${p.lastName} story will be in the feeds by morning. We need a line.`, `Everyone on the floor is talking about ${fullName(p)}. Decide before the press does.`],
     };
   },
@@ -680,7 +680,7 @@ const voices: Partial<Record<InboxKind, Voice>> = {
     const c = d.data?.cliqueId ? state.cliques[d.data.cliqueId] : undefined;
     const l = at(state, d, 0);
     return l && c && {
-      speaker: chiefOfStaff(state),
+      speaker: secretary(state),
       lines: [`${fullName(l)} has a following now. They call themselves ${c.name}.`, `${c.name} meets after hours. ${fullName(l)} runs it, and it's growing.`],
     };
   },
@@ -693,11 +693,11 @@ const voices: Partial<Record<InboxKind, Voice>> = {
     } : null;
   },
   fixerFallout: (state) => ({
-    speaker: functionHead(state, 'legal') ?? chiefOfStaff(state),
+    speaker: functionHead(state, 'legal') ?? secretary(state),
     lines: ["The fixer job didn't stay quiet. Someone has our name.", "A journalist called me about that job. How much do we want this to go away?"],
   }),
   talentWave: (state) => ({
-    speaker: chiefOfStaff(state),
+    speaker: secretary(state),
     lines: ["The field is thinning and awakened people are walking in off the street. We could sign one before the rivals do."],
   }),
   tipOff: (state, d) => {
