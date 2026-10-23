@@ -18,7 +18,8 @@
   --sab: env(safe-area-inset-bottom, 0px);
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15px; line-height: 1.4; overflow-x: hidden; }
+/* clip, not hidden: hidden makes body a scroll container and unsticks the top bar. */
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15px; line-height: 1.4; overflow-x: clip; }
 body { min-height: 100dvh; }
 button, input, select, textarea { font: inherit; color: inherit; }
 #app { max-width: 520px; margin: 0 auto; min-height: 100dvh; position: relative; border-left: 1px solid #10151a; border-right: 1px solid #10151a; }
@@ -282,3 +283,26 @@ label.btn:focus-within { outline: 2px solid var(--cyan); outline-offset: 2px; }
   .cn-chev { width: 30px; margin: 0 -2px 0 -10px; }
   .cn-go { width: 30px; }
 }
+
+/* goals, guidance and onboarding */
+.presets { display: flex; gap: 6px; }
+.preset { flex: 1; min-width: 0; flex-direction: column; gap: 2px; padding: 6px 4px; }
+.preset .label { font-size: 11px; line-height: 1.15; white-space: normal; }
+.preset.on { background: #123c43; border-color: var(--cyan); }
+.pickbox { margin-top: 8px; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--rule); border-radius: 6px; }
+.pickbox > div + div { margin-top: 2px; }
+.steps { padding: 8px 12px 10px; }
+.steps .stepsHide { padding: 2px 0; }
+.stepslist { list-style: none; margin: 6px 0 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.step { display: flex; align-items: center; gap: 8px; width: 100%; height: 100%; min-height: 44px; padding: 4px 8px; background: var(--panel2); border: 1px solid var(--rule); border-radius: 6px; text-align: left; font-size: 13px; line-height: 1.25; cursor: pointer; }
+.step.done { cursor: default; color: var(--dim); background: none; border-style: dashed; }
+.step .tick { width: 14px; text-align: center; flex: none; }
+.steps .hint { margin-top: 8px; }
+.dcard { position: relative; }
+.dcard button.link { position: static; }
+.dcard button.link::after { inset: 0; }
+.dcard:has(.opener:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.namebtn { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; min-height: 40px; }
+.inshort { margin: 4px 0 12px; padding: 10px 12px; background: #0e1d20; border: 1px solid #1f5b63; border-radius: 6px; }
+.inshort ul { margin: 6px 0 0; padding-left: 18px; }
+.inshort li + li { margin-top: 4px; }

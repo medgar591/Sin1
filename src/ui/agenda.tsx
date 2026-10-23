@@ -1,14 +1,14 @@
 // The CEO's agenda: what needs you this month, how the quarter stands, what the board wants.
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import type { GameState, PersonId } from '../sim/types';
-import { secretary, formatZuzu, fullName, isActive, monthLabel, shortName } from '../sim/org';
+import type { GameState, Person, PersonId } from '../sim/types';
+import { secretary, formatZuzu, fullName, isActive, monthLabel, opinionOf } from '../sim/org';
 import { askProgress } from '../sim/asks';
-import { directorSupport } from '../sim/board';
-import { quarterOutlook, suggestedGuidance, type QuarterOutlook } from '../sim/economy';
+import { NO_CONFIDENCE_LEVEL, directorSupport } from '../sim/board';
+import { guidanceCredit, quarterOutlook, suggestedGuidance, type QuarterOutlook } from '../sim/economy';
 import { setGuidance } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
-import { Btn, PersonChip, Stepper, plotStage } from './common';
+import { Btn, PersonChip, Stepper, plotStage, stanceWord } from './common';
 import { Portrait } from './portrait';
 import { OpenAsks } from './board';
 import { game, goOrg, openPerson, openSheet, run, setTab } from './store';
@@ -26,13 +26,56 @@ interface AgendaItem {
 const MAX_ITEMS = 6;
 const PROMISE_WINDOW = 2;
 const TURNING_AT = -10;
+/** Board confidence below these gets an amber / red row on the agenda. */
+const CONFIDENCE_AMBER = 45;
+const CONFIDENCE_RED = 35;
+/** The rival stops being the first suggestion once they think this well of the CEO. */
+const RIVAL_WON_OVER = 15;
+/** An officer who thinks this well of the CEO (or better) is not worth a nudge. */
+const MEET_SKIP_OPINION = 50;
 
 const PROMISE_NOUN: Record<string, string> = { promotion: 'a promotion', raise: 'a raise', protection: 'protection', budget: 'a bigger budget' };
 
 const monthName = (m: number) => monthLabel(m).split(' ')[0];
 
-function scrollToQuarter() {
-  document.getElementById('quarter-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+/** Scrolls a dashboard card into view (instantly under reduced motion) and moves focus to it. */
+export function scrollToCard(id: string) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' });
+  el.focus({ preventScroll: true });
+}
+
+export const scrollToQuarter = () => scrollToCard('quarter-card');
+const scrollToAsks = () => scrollToCard('asks-card');
+
+export interface MeetingSuggestion {
+  id: PersonId;
+  opinion: number;
+  /** Why this person, in a few words. */
+  why: string;
+}
+
+/**
+ * Who the CEO should see first: the officer passed over for the chair (the
+ * briefing names them) unless they have come round, otherwise the officer who
+ * thinks least of the CEO. Null when everyone is already won over.
+ */
+export function suggestedMeeting(g: GameState): MeetingSuggestion | null {
+  const ceo = g.player.personId;
+  const onStaff = (p: Person | undefined): p is Person => !!p && isActive(p) && p.unitId !== null;
+  const rival = g.rivalId ? g.people[g.rivalId] : undefined;
+  if (onStaff(rival)) {
+    const opinion = opinionOf(g, rival.id, ceo);
+    if (opinion < RIVAL_WON_OVER) return { id: rival.id, opinion, why: 'passed over for the chair' };
+  }
+  const worst = Object.values(g.people)
+    .filter((p) => p.role === 'officer' && onStaff(p))
+    .map((p) => ({ id: p.id, opinion: opinionOf(g, p.id, ceo) }))
+    .sort((a, b) => a.opinion - b.opinion)[0];
+  if (!worst || worst.opinion >= MEET_SKIP_OPINION) return null;
+  return { ...worst, why: 'your least warm officer' };
 }
 
 export function buildAgenda(g: GameState): AgendaItem[] {
@@ -54,6 +97,15 @@ export function buildAgenda(g: GameState): AgendaItem[] {
     out.push({ key: `plot${pid}`, tone: 2, who: pid, go: () => openPerson(pid), text: <><b>{name(pid)}</b> is moving against you ({plotStage(p.progress)}).</> });
   }
 
+  const conf = g.company.boardConfidence;
+  if (conf < CONFIDENCE_AMBER) {
+    out.push({
+      key: 'confidence', tone: conf < CONFIDENCE_RED ? 2 : 1, go: () => setTab('board'),
+      text: <>Board confidence {Math.round(conf)}. Below {NO_CONFIDENCE_LEVEL} they can vote you out.</>,
+      sub: 'Beating guidance and meeting the board’s asks raises it.',
+    });
+  }
+
   if (q.monthsLeft === 1) {
     out.push({ key: 'board', tone: 1, text: <>The board meets at the end of this month.</>, sub: 'Your guidance and the directors’ asks are judged then.' });
   }
@@ -65,11 +117,14 @@ export function buildAgenda(g: GameState): AgendaItem[] {
     if (sup < TURNING_AT) out.push({ key: `turn${d.personId}`, tone: 2, who: d.personId, go: () => openPerson(d.personId), text: <><b>{name(d.personId)}</b> is turning against you.</>, sub: 'A director who loses faith votes you out.' });
   }
 
-  for (const a of g.asks ?? []) {
-    if (a.state !== 'open' || !g.people[a.directorId]) continue;
-    const pr = askProgress(g, a);
-    if (pr.met) continue;
-    out.push({ key: `ask${a.id}`, tone: 1, who: a.directorId, go: () => setTab('board'), text: <><b>{shortName(g.people[a.directorId])}</b> wants: {a.text}</>, sub: `So far: ${pr.label}` });
+  const behind = (g.asks ?? []).filter((a) => a.state === 'open' && g.people[a.directorId] && !askProgress(g, a).met);
+  if (behind.length) {
+    const due = Math.min(...behind.map((a) => a.dueMonth));
+    out.push({
+      key: 'asks', tone: 1, go: scrollToAsks,
+      text: <>{behind.length} board {behind.length === 1 ? 'ask is' : 'asks are'} not on track yet.</>,
+      sub: `Due by ${monthLabel(due)}.`,
+    });
   }
 
   if (g.company.bonusPool > 0) {
@@ -101,6 +156,17 @@ export function buildAgenda(g: GameState): AgendaItem[] {
   if (other) {
     const [pid, p] = other;
     out.push({ key: `plotx${pid}`, tone: 1, who: pid, go: () => openPerson(pid), text: <><b>{name(pid)}</b> is working against {name(p.targetId)} ({plotStage(p.progress)}).</> });
+  }
+
+  if (g.player.attentionLeft > 0 && !out.some((it) => it.tone === 2)) {
+    const m = suggestedMeeting(g);
+    if (m) {
+      out.push({
+        key: 'meet', tone: 0, who: m.id, go: () => openPerson(m.id),
+        text: <>Suggestion: meet <b>{name(m.id)}</b> ({stanceWord(m.opinion)}, {m.why}).</>,
+        sub: `${g.people[m.id].title} · a meeting costs ${ATTENTION_COST.meet} attention`,
+      });
+    }
   }
 
   out.sort((a, b) => b.tone - a.tone || 0);
@@ -160,8 +226,8 @@ function Tick({ pct, color, label, below }: { pct: number; color: string; label:
   );
 }
 
-function QuarterBar({ q }: { q: QuarterOutlook }) {
-  const vals = [q.profitSoFar, q.projected, q.guidance ?? 0, q.expectation ?? 0, 0];
+function QuarterBar({ q, pick }: { q: QuarterOutlook; pick?: number | null }) {
+  const vals = [q.profitSoFar, q.projected, q.guidance ?? 0, q.expectation ?? 0, pick ?? 0, 0];
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
   const span = Math.max(hi - lo, 1) * 1.08;
@@ -170,13 +236,21 @@ function QuarterBar({ q }: { q: QuarterOutlook }) {
   const book = at(q.profitSoFar);
   const proj = at(q.projected);
   const fill = (a: number, b: number) => ({ left: `${Math.min(a, b)}%`, width: `${Math.abs(b - a)}%` });
+  const summary = [
+    `Booked ${formatZuzu(q.profitSoFar)}`,
+    `projected ${formatZuzu(q.projected)}`,
+    q.guidance !== null && `guidance ${formatZuzu(q.guidance)}`,
+    pick != null && `your pick ${formatZuzu(pick)}`,
+    q.expectation !== null && `board’s bar ${formatZuzu(q.expectation)}`,
+  ].filter(Boolean).join(', ');
   return (
-    <div class="qwrap" style={{ marginTop: q.guidance !== null || q.expectation !== null ? undefined : '0' }}>
+    <div class="qwrap" role="img" aria-label={summary} style={{ marginTop: q.guidance !== null || q.expectation !== null ? undefined : '0' }}>
       <div class="qbar">
         <i class="qproj" style={fill(book, proj)} />
         <i class="qbook" style={fill(zero, book)} />
         {lo < 0 && <i class="qzero" style={{ left: `${zero}%` }} />}
         {q.guidance !== null && <Tick pct={at(q.guidance)} color="var(--cyan)" label="Your guidance" />}
+        {q.guidance === null && pick != null && pick > 0 && <Tick pct={at(pick)} color="var(--cyan)" label="Your pick" />}
         {q.expectation !== null && <Tick pct={at(q.expectation)} color="var(--amber)" label="Board’s bar" below />}
       </div>
     </div>
@@ -203,18 +277,62 @@ function verdicts(q: QuarterOutlook): { tone: string; text: string }[] {
   return out;
 }
 
+interface Preset {
+  key: string;
+  label: string;
+  value: number;
+}
+
+const to10K = (v: number) => Math.round(v / 10_000) * 10_000;
+/** Stretch aims this far above the better of the projection and the board's bar. */
+const STRETCH = 1.05;
+
+/**
+ * The guidance choices offered while the player picks: Safe (the sim's
+ * suggestion), the board's bar (rounded up so it never lands under it) and
+ * Stretch. The stepper starts on the board's bar when the run-rate already
+ * covers it, and on Safe otherwise.
+ */
+function guidancePresets(q: QuarterOutlook, safe: number): { presets: Preset[]; start: number } {
+  const bar = q.expectation === null ? null : Math.ceil(q.expectation / 10_000) * 10_000;
+  const presets: Preset[] = [{ key: 'safe', label: 'Safe', value: safe }];
+  if (bar !== null) presets.push({ key: 'bar', label: 'Board’s bar', value: bar });
+  presets.push({ key: 'stretch', label: 'Stretch', value: to10K(Math.max(q.projected, q.expectation ?? 0) * STRETCH) });
+  const usable = presets.filter((p) => p.value > 0);
+  const start = bar !== null && q.projected >= bar ? bar : safe;
+  return { presets: usable, start };
+}
+
+/** What a staged guidance figure is worth if beaten, and what it risks if missed, in plain words. */
+function PickNotes({ q, val }: { q: QuarterOutlook; val: number }) {
+  const credit = guidanceCredit(val, q.expectation);
+  const reward = credit >= 1 ? { tone: 'green', text: 'If beaten: full board credit.' }
+    : credit > 0 ? { tone: 'amber', text: `If beaten: partial credit (${Math.round(credit * 100)}%).` }
+    : { tone: 'red', text: 'If beaten: no credit. Well below the board’s bar.' };
+  const d = q.projected - val;
+  const outlook = near(d, val) ? 'The projection lands right on it.' : d > 0 ? `The projection clears it by ${formatZuzu(d)}.` : `The projection falls short by ${formatZuzu(-d)}.`;
+  return (
+    <div class="pickbox small" aria-live="polite" aria-atomic="true">
+      <div class={reward.tone}>{reward.text}</div>
+      <div>If missed: confidence and share price fall, and the bonus pool is thinner.</div>
+      <div class="dim">{outlook}</div>
+    </div>
+  );
+}
+
 export function QuarterCard() {
   const g = game();
   const q = quarterOutlook(g);
   const [amount, setAmount] = useState<number | null>(null);
   let suggested = 0;
   try { suggested = suggestedGuidance(g); } catch { suggested = 0; }
-  const val = amount ?? suggested;
+  const { presets, start } = guidancePresets(q, suggested);
+  const val = amount ?? start;
   const step = Math.max(10000, Math.round(Math.abs(suggested) * 0.05 / 10000) * 10000);
   const unannounced = q.guidance === null;
   const vs = verdicts(q);
   return (
-    <div id="quarter-card" class={`card ${unannounced ? 'warn' : ''}`} style={{ scrollMarginTop: '120px' }}>
+    <div id="quarter-card" tabIndex={-1} class={`card ${unannounced ? 'warn' : ''}`} style={{ scrollMarginTop: '120px' }}>
       <div class="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
         <div class="label">{q.label} · board meets end of {monthName(q.boardMonth)}</div>
         <span class="mono small dim" style={{ whiteSpace: 'nowrap' }}>{q.monthsLeft} mo left</span>
@@ -224,19 +342,32 @@ export function QuarterCard() {
         <div><span class="label">Projected</span><b class={q.projected < 0 ? 'red' : ''}>{formatZuzu(q.projected)}</b></div>
         <div><span class="label">Guidance</span><b class={unannounced ? 'amber' : 'cyan'}>{unannounced ? 'none' : formatZuzu(q.guidance!)}</b></div>
       </div>
-      <QuarterBar q={q} />
+      <QuarterBar q={q} pick={unannounced ? val : null} />
       {vs.map((v, i) => <div key={i} class={v.tone} style={{ fontSize: '13px', marginTop: i ? '2px' : '0' }}>{v.text}</div>)}
       {q.monthsIn === 0 && <div class="hint" style={{ marginTop: '4px' }}>Nothing booked yet; the projection is this month’s run-rate.</div>}
       {unannounced && (
         <div style={{ marginTop: '12px', borderTop: '1px solid var(--rule)', paddingTop: '10px' }}>
           <div class="label amber" style={{ marginBottom: '4px' }}>Announce guidance</div>
           <div class="hint" style={{ marginBottom: '8px' }}>
-            A profit target for this quarter. Beat it and the stock rises; miss it and confidence falls.
-            {q.expectation !== null && <> The board expects about <b>{formatZuzu(q.expectation)}</b>. Guiding below it earns little credit.</>}
+            A profit target for this quarter. Beat it and the share price and board confidence rise; miss it and both fall.
+            {q.expectation !== null && <> The board expects about <b>{formatZuzu(q.expectation)}</b>. Guiding below it earns less credit for a beat.</>}
           </div>
-          <Stepper value={val} step={step} onChange={setAmount} format={formatZuzu} min={-1e12} />
+          <div class="presets" role="group" aria-label="Guidance presets">
+            {presets.map((p) => (
+              <button key={p.key} type="button" class={`btn preset ${val === p.value ? 'on' : ''}`} aria-pressed={val === p.value} onClick={() => setAmount(p.value)}>
+                <span class="label">{p.label}</span>
+                <b class="mono">{formatZuzu(p.value)}</b>
+              </button>
+            ))}
+          </div>
+          <div role="group" aria-label="Guidance amount" style={{ marginTop: '8px' }}>
+            <Stepper value={val} step={step} onChange={setAmount} format={formatZuzu} min={-1e12} />
+          </div>
+          {val > 0
+            ? <PickNotes q={q} val={val} />
+            : <div class="pickbox small red">Guidance has to be a positive profit figure.</div>}
           <div style={{ marginTop: '8px' }}>
-            <Btn cls="primary block" cost={ATTENTION_COST.setGuidance} onClick={() => run((s) => setGuidance(s, val))}>Announce {formatZuzu(val)}</Btn>
+            <Btn cls="primary block" cost={ATTENTION_COST.setGuidance} disabled={val <= 0} onClick={() => { if (run((s) => setGuidance(s, val))) setAmount(null); }}>Announce {formatZuzu(val)}</Btn>
           </div>
         </div>
       )}
@@ -252,7 +383,7 @@ export function AsksCard() {
   if (asks.length === 0) return null;
   const due = Math.min(...asks.map((a) => a.dueMonth));
   return (
-    <div class="card" style={{ padding: '10px 0 0', overflow: 'hidden' }}>
+    <div id="asks-card" tabIndex={-1} class="card" style={{ padding: '10px 0 0', overflow: 'hidden', scrollMarginTop: '120px' }}>
       <div style={{ padding: '0 12px 6px' }}>
         <div class="label">What the board wants by {monthLabel(due)}</div>
         <div class="small dim">Meet these and the directors back you; miss them and they cool.</div>
@@ -277,7 +408,7 @@ export function LastMonthCard() {
     <div class="card">
       <div class="row" style={{ justifyContent: 'space-between' }}>
         <div class="label">Last month · {monthLabel(g.month - 1)}</div>
-        <a class="link small" onClick={() => setTab('more')}>Full log ›</a>
+        <button type="button" class="link small" onClick={() => setTab('more')}>Full log ›</button>
       </div>
       {rows.map((l, i) => (
         <div key={i} class="lmrow">

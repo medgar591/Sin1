@@ -343,7 +343,8 @@ export function isQuarterEnd(month: Month): boolean {
 
 /** Formats zuzu compactly, symbol after the number: 1.2Mㄓ, 340Kㄓ. */
 export function formatZuzu(amount: number): string {
-  const sign = amount < 0 ? '-' : '';
+  // Anything that rounds to zero prints as 0, not -0.
+  const sign = amount <= -0.5 ? '-' : '';
   const a = Math.abs(amount);
   if (a >= 1e9) return `${sign}${(a / 1e9).toFixed(2)}Bㄓ`;
   if (a >= 1e6) return `${sign}${(a / 1e6).toFixed(1)}Mㄓ`;

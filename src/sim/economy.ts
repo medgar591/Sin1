@@ -439,6 +439,15 @@ export function fairSharePrice(state: GameState): number {
 }
 
 /**
+ * How much of the usual reward beating `guidance` earns, 0 to 1. Guidance below
+ * 94% of the board's expectation is sandbagging and earns nothing; full credit
+ * needs 102%; in between it rises in a straight line. Without a bar it is 1.
+ */
+export function guidanceCredit(guidance: number, expectation: number | null): number {
+  return expectation === null ? 1 : clamp((guidance / expectation - SANDBAG_FLOOR) / (SANDBAG_FULL - SANDBAG_FLOOR), 0, 1);
+}
+
+/**
  * Closes the quarter that ends this month: sums profit, judges it against
  * guidance and the board's own expectation, moves share price and board
  * confidence, pays the dividend, sets the bonus pool, and clears guidance for
@@ -463,8 +472,7 @@ export function closeQuarter(state: GameState): QuarterResult {
   if (guidance !== null) {
     surprise = (profit - guidance) / Math.max(Math.abs(guidance), 500_000);
     // Guidance far below what the board already expects is sandbagging: beating it earns little.
-    const credit =
-      expectation === null ? 1 : clamp((guidance / expectation - SANDBAG_FLOOR) / (SANDBAG_FULL - SANDBAG_FLOOR), 0, 1);
+    const credit = guidanceCredit(guidance, expectation);
     if (surprise >= 0) {
       priceMove = Math.min(BEAT_PRICE_CAP, surprise * BEAT_PRICE) * credit;
       confMove = credit * Math.min(BEAT_CONF_CAP, BEAT_CONF_BASE + surprise * BEAT_CONF_SLOPE);
