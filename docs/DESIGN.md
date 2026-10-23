@@ -1,130 +1,24 @@
 # Sin1: Design
 
-A phone-first management game about running a megacorporation in the Sinless
-setting. You are the CEO of a young zaibatsu in a walled enclave with no
-government, fighting other corps for holdings, stock and people while keeping
-your own board from replacing you.
+A phone-first game about the inside of a megacorporation in the Sinless
+setting. You are the CEO of a zaibatsu. Beneath you is a deep, simulated
+hierarchy of people who squabble, scheme and compete. Keep the company
+growing and keep the board happy, or lose your job.
 
 This document is the working design. Sections marked **(open)** still need a
 decision.
 
-## MVP: the internal politics game
-
-The first playable version is only the inside of one corp. Everything after
-this section is the longer-term vision and is **out of the MVP** unless this
-section pulls it in.
-
-### The premise
-
-You are the newly installed CEO of an established zaibatsu with a few
-divisions. Under you is a full hierarchy of generated people who squabble,
-scheme and compete. Keep the company growing and keep the board happy, or
-lose your job.
-
-### The company
-
-- 3–5 **divisions** in different industries. Each has budget, revenue, costs,
-  growth, morale and output.
-- Corp-level numbers: cash, quarterly profit, an abstract share price driven
-  by profit against guidance, and **board confidence**.
-- The outside world is abstract: market conditions, timeline news, and
-  unnamed rival corps that poach staff or make offers. No map, no stock
-  trading, no rival AI.
-
-### The hierarchy
-
-Roughly 40–60 named characters. Below them, staff are just headcount.
-
-- **The board** (5–7): a chair and directors, each with an agenda.
-- **The C-suite:** COO, CFO, Head of Security, Head of Personnel, General
-  Counsel.
-- **Division heads**, one per division.
-- **Deputies and VPs**, 2–3 under each division head and executive.
-
-### Characters
-
-- Name, age, heritage (human, Green, Blighted, uplift, synth), and a generated
-  portrait or icon.
-- Skills: Management, Operations, Finance and Guile.
-- Personality: Loyalty to you, Ambition, Greed, and two traits (principled,
-  paranoid, vain, ruthless and so on).
-- Career: salary, satisfaction, tenure and performance.
-- **Relationships:** an opinion of every character they know, with tags
-  (mentor, protégé, rival, lover, grudge).
-- **Cliques:** informal factions inside the company that back their own people
-  for promotions and lean on the board.
-- **Secrets:** hidden facts (embezzlement, an affair, a pre-hire past, a
-  rival corp's payroll) that can be uncovered and used.
-
-### Your turn (one month)
-
-Your **attention** is limited: a few actions per month. You can:
-
-- **Budget:** allocate capital between divisions.
-- **Personnel:** hire, fire, promote, demote, reassign, set salaries, split the
-  bonus pool and grant stock options.
-- **Meetings:** one-on-ones to build rapport, make promises, threaten, or
-  probe for information. Promises are tracked, and breaking one costs you.
-- **Investigations:** have Security dig into someone.
-- **Board:** lobby individual directors.
-- **Inbox:** rule on requests and events (raise demands, feuds, accusations,
-  resignations, offers from outside).
-- **Fixer requests:** a stripped-down Sinless run (see below).
-
-### What the NPCs do
-
-Every month each character acts according to their traits and relationships.
-They can:
-
-- work, and their performance feeds division output;
-- ask for raises, budget or promotion;
-- take credit or shift blame;
-- undermine a rival;
-- form or break alliances;
-- court board members;
-- leak, embezzle;
-- quit or defect to an outside corp;
-- plot to replace their boss, including you.
-
-Infighting costs output. Loyal, well-placed people make divisions run well.
-
-### Quarters
-
-- Earnings are judged against the guidance you set.
-- The bonus pool is fought over.
-- The board meets. Directors raise motions, such as replacing an executive,
-  cutting a division's budget, or a no-confidence vote in you. Votes follow
-  each director's opinion of you and their ties to whoever is plotting.
-- **Succession:** empty seats get filled from below. Cliques lobby, and
-  passed-over people resent it.
-
-### Fixer requests
-
-A stripped-down run. You ask a fixer to get something: scarce materials
-for a division, a special hire extracted from elsewhere, or dirt on someone.
-You pick the budget and whether it must be clean. A report comes back later
-with the result and any blowback.
-
-### Ending
-
-The game ends if a no-confidence vote passes, or if you retire. Your score
-counts tenure, company growth and your personal fortune, adjusted by how you
-left.
-
 ## Pillars
 
-1. **Running the corp is the game.** Growing subsidiaries, moving money and
-   managing people come first. Everything else serves that.
-2. **Stock is the weapon.** Corps fight mostly through ownership: buying
-   stakes, swapping shares, proxy fights and hostile takeovers.
-3. **People make it personal.** Every corp is a cast of executives with
-   loyalties, ambitions and grudges. Deals are cut with people, not
-   spreadsheets, and your own people can turn on you.
-4. **The executive's view.** You see charts, maps, org charts and reports.
-   Your people handle the details, and you live with how they do it.
-5. **Runs are a tool, not the main loop.** Covert jobs are fleshed out
-   but sit alongside deals and stock moves as one option among several.
-6. **Played straight.** The tone is serious corporate drama, not satire.
+1. **The org is the game.** The company is a deep, irregular hierarchy of
+   people. Managing that hierarchy is how you run the company.
+2. **People make it personal.** Everyone has loyalties, ambitions, grudges
+   and secrets. Feuds, alliances and backstabbing come out of the simulation.
+3. **The executive's view.** You see org charts, reports and numbers. Your
+   people handle the details, and you live with how they do it.
+4. **Keep your job.** Growth satisfies the board. Losing the board ends the
+   game.
+5. **Played straight.** Serious corporate drama, not satire.
 
 ## Setting
 
@@ -132,174 +26,128 @@ left.
   SINs and the sinless, the DIRE act, the zuzu (ㄓ), uplifts, synths, AI ranks,
   the thinning Shan-Effort field, Mammon's quarantine) and the Sinless
   timeline.
-- The game takes place in a **generic walled enclave** with no governing
-  body. Corps and factions squabble over it directly. The enclave doesn't
-  have a fixed identity. It's generated per game.
-- Timeline events surface as news and move markets (for example, the field
-  dropping to 60% in August 2090 boosts manon-related demand).
+- The outside world is abstract: market conditions, timeline news, and
+  unnamed rival corps that poach staff or make offers.
 
-## Game setup
+## The company
 
-- **Your corp:** name, colour, and two **culture traits** (e.g. Ruthless,
-  Paternalistic, Image-Obsessed, Lean, Secretive, Innovative). Traits bias
-  board expectations, staff loyalty, crew pricing and how others react to
-  you. You pick the industry of your first subsidiary.
-- **Opponents:** a configurable number of AI corps. Each one gets a
-  configurable **size** (e.g. Startup, Mid-cap, Large, Megacorp). Megacorps
-  are DIRE-sovereign giants: very hard to take over and slow to act, but
-  dangerous when provoked.
-- **Seed:** each game is generated from a seed that can be shared to replay
-  the same enclave and opponents.
+- A zaibatsu with a few **divisions** in different industries. Each has
+  budget, revenue, costs, growth, morale and output.
+- Corp-level numbers: cash, quarterly profit, an abstract share price driven
+  by profit against guidance, and **board confidence**.
 
-## Time
+## The hierarchy
 
-- **One turn = one month.**
-- **Every third turn is a quarter:** earnings land, guidance is judged, and the
-  board meets.
-- Open-ended. The game ends when you are ousted, or when you choose to retire.
+The company is a tree of **org units**, each led by a person.
 
-## The map
+| Level | Led by | Notes |
+| --- | --- | --- |
+| Board | Chair | 5–7 directors. They oversee you. They aren't part of the tree. |
+| CEO | You | |
+| C-suite | Officers | COO, CFO, Head of Security, Head of Personnel, General Counsel. Each runs a corporate function. |
+| Divisions | Division heads | One per business line. |
+| Sub-divisions | Sub-division heads | Optional. |
+| Teams | Team leads | |
+| Sub-teams | Sub-team leads | Optional. |
+| Workers | | The people doing the work. |
 
-- The enclave is a set of **sectors** shown on a stylised map.
-- Each sector shows **who holds what there**: every corp's facilities and
-  holdings, plus faction turf. It works at a glance, like a territory map.
-- Sectors differ in wealth, risk and which industries thrive there.
-  Facilities in a sector pay its costs and share its risks: faction trouble,
-  rival pressure, events.
-- This deliberately isn't the full Sinless sector sheet. Sectors exist to
-  place holdings and show territory, not to be ground through resource by
-  resource.
-
-## Corps and subsidiaries
-
-Every corp, yours included, is a **holding company with subsidiaries**.
-
-- **Industries:** Food, Pharma, Security, Cyberware, Media, Logistics,
-  Finance, Construction, Grid Services, Manastelliate.
-- **A subsidiary** has an industry, the sectors its facilities sit in,
-  revenue, margin, assets, headcount, morale, R&D level, and a **division
-  head**.
-- **Your levers per subsidiary:** invest capital, set a stance (expand,
-  maintain, harvest, cut costs), open or close facilities, and appoint or
-  fire its head.
-- **Portfolio moves:** found a new subsidiary, buy one, sell or spin one off,
-  merge two.
-- **Synergies:** industries feed each other. Logistics cheapens Food,
-  Security protects everything, Media softens scandals, Finance lowers
-  borrowing costs. Building a chain that supports itself is core strategy.
-
-## Markets
-
-- Each industry is a market with total demand, which moves with events and
-  the timeline, and market share held by the corps in it.
-- A subsidiary's revenue comes from its share of its market. Share moves
-  with investment, R&D, price, reputation and rival action.
-
-## Stock and ownership (the main battleground)
-
-- **Every corp is public** and has a share registry: founders and insiders,
-  board members, other corps, and the float.
-- **Share price** responds to earnings vs guidance, growth, scandals, rumours
-  and visible buying pressure.
-- **Moves:**
-  - Buy or sell any corp's shares on the market (large buys move the price
-    and get noticed).
-  - **Cross-holdings:** swap shares with an ally to lock up votes and defend
-    against takeovers.
-  - **Tender offers:** offer shareholders a premium directly.
-  - **Proxy fights:** win shareholder votes to replace board members.
-  - **Hostile takeover:** gain control of a corp through majority stake or
-    board control. You absorb its subsidiaries and its people (who may not
-    be happy about it).
-  - **Defence:** buybacks, issuing shares to friendly holders, poison pills,
-    white knights.
-  - **Your own stake:** you personally hold shares in your corp. Diluting it
-    to raise cash weakens your grip on the board.
+- **The tree is irregular.** A division may have no sub-divisions, with
+  teams reporting straight to its head. A team may have no sub-teams. A small
+  corporate function might be a single team.
+- **Every unit has a lead**, a budget, a headcount, morale and output. A
+  unit's output rolls up into its parent's, and divisions roll up into the
+  company.
+- **Managers matter.** A unit's output depends on its lead's competence, how
+  well the lead and their reports get along, morale, budget, and infighting.
+  A bad manager drags down everything under them. A feud between two team
+  leads hurts the sub-division above them.
 
 ## People
 
-A full cast, in every corp.
+- Name, age, heritage (human, Green, Blighted, uplift, synth), and a generated
+  portrait or icon.
+- Skills: Management, Operations, Finance and Guile.
+- Personality: Loyalty (to their boss, and to you), Ambition, Greed, and two
+  traits (principled, paranoid, vain, ruthless and so on).
+- Career: role, salary, satisfaction, tenure, performance, and promotion
+  history.
+- **Relationships:** opinions of the people they work with, tagged as mentor,
+  protégé, rival, lover or grudge.
+- **Cliques:** informal factions that cut across the tree, backing their own
+  people for promotions and leaning on whoever they can reach.
+- **Secrets:** hidden facts (embezzlement, an affair, a pre-hire past, a
+  rival corp's payroll) that can be uncovered and used.
+- **You** are a person too, with a personal stake, a reputation, and secrets
+  others can dig up.
 
-- **Characters** have a role, competence in a few areas, loyalty, ambition,
-  traits (greedy, principled, paranoid, vain, etc.), a personal share stake,
-  and **relationships** (allies, rivals, mentors, lovers, grudges) with
-  other characters, across corps too.
-- **Roles:** CEO, board members, division heads, key staff (head of security,
-  CFO, fixer contact, chief researcher), and their deputies.
-- **Career mechanics:** salary, bonuses, raises, promotions and succession.
-  People ask for raises, fight over bonus pools, resent being passed over,
-  and groom successors.
-- **Drama:** events come from the cast. Someone leaks, someone defects,
-  two division heads feud, a deputy undermines their boss, a board member
-  courts your CFO to replace you.
-- **Meetings:** you can meet characters in other corps and cut deals. For
-  example, a rival division head might:
-  - sell you their personal shares, or vote them your way;
-  - leak earnings, plans or dirt;
-  - sabotage their own division to drop the share price before your takeover;
-  - defect to you, bringing staff or a whole subsidiary with them;
-  - in return for money, a promotion promise, protection, or the head of
-    their rival.
+## Your turn (one month)
 
-  Deals are negotiated, and a character's traits and relationships set what
-  they want and whether they keep their word.
-- **Your own people** are subject to all of this too. Rivals court them.
+You have limited **attention**: about three actions a month. You can:
 
-## The board and your job
+- **Budget:** allocate money down the tree.
+- **Personnel:** hire, fire, promote, demote, reassign, set salaries, split the
+  bonus pool and grant stock options.
+- **Restructure:** move units, merge or split them, or create and dissolve
+  levels.
+- **Meet:** one-on-ones to build rapport, make promises, threaten, or probe
+  for information. Promises are tracked, and breaking one costs you.
+- **Investigate:** have Security dig into someone.
+- **Board:** lobby individual directors.
+- **Inbox:** rule on requests and events (raise demands, feuds, accusations,
+  resignations, outside offers).
+- **Fixer requests:** see below.
 
-- Your board has 5–7 members, each with an agenda (growth, safety,
-  dividends, an outside corp's interests, personal ambition). Corps that buy
-  into you can win seats.
-- **Quarterly guidance:** you announce a target. Beating it builds board
-  confidence and raises the share price. Missing it, or a scandal that traces
-  to you, does the reverse.
-- **Board confidence** falls to a no-confidence vote, which you can fight by
-  lobbying members and cutting side deals. Lose it and the game ends, scored
-  by how you went out.
+## What the NPCs do
 
-## Runs
+Every month each person acts according to their traits, relationships and
+place in the tree. They can:
 
-A secondary but fleshed-out tool for covert action against corps,
-characters and factions.
+- work, and their performance feeds their unit's output;
+- ask for raises, budget or promotion;
+- take credit and shift blame up and down the chain;
+- undermine a rival;
+- form or break alliances;
+- court their boss's boss, or the board;
+- leak, embezzle;
+- quit or defect to an outside corp;
+- plot to replace their boss, all the way up to you.
 
-1. **Design the job:** target (a facility, a subsidiary, a character, a
-   faction), goal (steal R&D, sabotage, extract, eliminate, plant evidence,
-   gather blackmail, protect), high-level **restrictions** (no killing, no
-   trace, deadline) and **bonuses** for actions you want (extra paydata, zero
-   casualties).
-2. **Canvas and negotiate:** a fixer brings candidate crews. Crew members
-   have roles, skills, reputation, quirks and outside ties. You haggle over
-   pay, advance and support. Restrictions change price and the chance they
-   get broken.
-3. **The run:** hands-off once negotiation closes. It's lightly simulated in
-   phases (legwork, entry, objective, exit) using Sinless-style dice pools
-   against the target's security, with operational heat rising as it goes
-   wrong.
-4. **Debrief and reaction:** an after-action report (outcome, collateral,
-   traceability, betrayal), then one reaction: pay in full, short them, bury
-   it, or clean up loose ends. Each has consequences.
+Managers make decisions too: they hire, fire and promote inside their own
+units, according to their own loyalties and judgement.
 
-Rival corps run operations against you too. Your security spending and your
-Security subsidiary decide how well you hold up.
+## Quarters
 
-## Factions
+- Earnings are judged against the guidance you set.
+- The bonus pool is fought over, from the C-suite down.
+- The board meets. Directors raise motions, such as replacing an executive,
+  cutting a division's budget, or a no-confidence vote in you. Votes follow
+  each director's opinion of you and their ties to whoever is plotting.
+- **Succession:** empty seats get filled from below. Cliques lobby, and
+  people who are passed over resent it.
 
-Gangs, street groups and other non-corp powers that share the enclave. They
-stay light: they hold turf on the map, raise or lower the cost and risk of
-operating in a sector, and can be paid off, hired or fought.
+## Fixer requests
+
+A stripped-down Sinless run. You ask a fixer to get something: scarce
+materials for a unit, a special hire extracted from elsewhere, or dirt on
+someone. You pick the budget and whether it must be clean. A report comes
+back later with the result and any blowback.
+
+## Ending
+
+The game ends if a no-confidence vote passes, or if you retire. Your score
+counts tenure, company growth and your personal fortune, adjusted by how you
+left.
 
 ## Interface
 
-Built for a phone, one-handed, portrait.
+Built for a phone, one-handed, portrait. A dark, data-dense corporate
+terminal look.
 
-- **Dashboard:** cash, revenue, upkeep, share price, board confidence; trend
-  charts.
-- **Map:** sectors and holdings.
-- **Portfolio:** subsidiaries and their numbers.
-- **Markets & Stock:** share registries, prices, ownership moves.
-- **People:** org charts for every corp, character cards, relationships.
-- **Ops:** runs being planned, active and debriefed.
-- **Inbox:** this turn's news, requests and events needing decisions.
+- **Dashboard:** cash, profit, share price, board confidence; trend charts.
+- **Org chart:** drill down the tree from the C-suite to the workers.
+- **People:** character cards, relationships, cliques.
+- **Board:** directors, their agendas and the vote count.
+- **Inbox:** this month's requests and events.
 
 ## Technology
 
@@ -309,38 +157,11 @@ Built for a phone, one-handed, portrait.
 - Simulation separated from UI, driven by a seeded RNG so games are
   reproducible and the sim can be unit-tested.
 
-## Proposed v1 scope
-
-**In v1:**
-
-- Corp founding and opponent configuration (count and size).
-- A generated enclave map with holdings.
-- Subsidiaries, a core set of industries, markets and basic synergies.
-- Share registries, trading, cross-holdings, tender offers and hostile
-  takeover of whole corps.
-- The cast: characters with loyalty, ambition, traits and relationships;
-  salaries, bonuses, raises, promotion and succession; a starter set of drama
-  events.
-- Meetings and deals with rival characters.
-- Your board, quarterly guidance and the no-confidence vote.
-- Runs: job design, crew negotiation, simulated run, debrief and one reaction.
-- AI rivals that invest, trade stock, make deals and occasionally run ops.
-- Light factions.
-
-**Later:**
-
-- Proxy fights and advanced defences (poison pills, white knights).
-- R&D projects and named products.
-- Deeper factions and sector events.
-- Magic and grid specialisms.
-- Crossing the DIRE line into sovereignty.
-- Expansion beyond the enclave.
-
 ## Open questions
 
-- **(open)** Does crossing the DIRE line (ㄓ1B GDP) matter in v1: a milestone, a
-  score, or nothing yet?
-- **(open)** Is the player a character in the cast: stats, relationships, a
-  personal fortune, someone others can scheme against directly?
-- **(open)** How is a game scored when it ends?
-- **(open)** Visual style.
+- **(open)** Are workers individual people, or headcount inside their team?
+- **(open)** Can you act directly on someone several levels down, and what
+  does skipping their bosses cost?
+- **(open)** Do you see the truth about the org, or only what your reports
+  choose to tell you?
+- **(open)** How big is the company?
