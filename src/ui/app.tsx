@@ -2,12 +2,14 @@ import type { JSX } from 'preact';
 import type { GameState } from '../sim/types';
 import { advanceMonth } from '../sim/turn';
 import { formatZuzu, monthLabel } from '../sim/org';
+import { quarterOutlook } from '../sim/economy';
 import { Pips, Sheet, zuzuPrice } from './common';
 import { BonusSheet, Dashboard } from './dashboard';
 import { OrgView, UnitSheet } from './org';
 import { PersonSheet } from './person';
 import { Inbox } from './inbox';
-import { BoardView, MeetingView } from './board';
+import { BoardView, MeetingView, OpenAsks } from './board';
+import { IntroSheet } from './intro';
 import { MoreView } from './more';
 import { GameOver } from './gameover';
 import { Title } from './title';
@@ -20,6 +22,7 @@ function doEndMonth() {
   const g = S.game;
   if (!g) return;
   const meetings = g.boardMeetings.length;
+  const seen = new Set(g.inbox.map((i) => i.id));
   const pending = new Set(g.fixerJobs.filter((j) => j.state === 'pending').map((j) => j.id));
   try {
     advanceMonth(g);
@@ -33,6 +36,7 @@ function doEndMonth() {
     const unresolved = pendingInbox(g).length;
     const reports = g.fixerJobs.filter((j) => pending.has(j.id) && j.state !== 'pending').length;
     const bits = [`${monthLabel(g.month)}.`, unresolved ? `${unresolved} item${unresolved > 1 ? 's' : ''} in the inbox.` : 'Quiet start.'];
+    if (g.inbox.some((i) => !seen.has(i.id) && i.resolution === null && (i.kind === 'tipOff' || i.kind === 'pitch'))) bits.push('Someone wants a private word.');
     if (reports) bits.push(`${reports} fixer report${reports > 1 ? 's' : ''} in (Board tab).`);
     toast(bits.join(' '));
     if (g.boardMeetings.length > meetings) S.sheets = [{ k: 'boardResult', index: g.boardMeetings.length - 1 }];
@@ -51,12 +55,17 @@ function TopBar() {
   const g = S.game!;
   const c = g.company;
   const conf = c.boardConfidence;
+  const q = quarterOutlook(g);
+  const soon = q.monthsLeft <= 1;
   return (
     <div class="topbar">
       <div class="r1">
         <div style={{ minWidth: 0 }}>
           <div class="co">{c.name}</div>
           <div class="mono small dim">{monthLabel(g.month)}</div>
+          <div class="mono dim" style={{ fontSize: '10.5px', lineHeight: 1.2 }}>
+            {q.label.split(' ')[0]} · {soon ? <span class="amber">board meets this month</span> : `board in ${q.monthsLeft - 1} mo`}
+          </div>
         </div>
         <button class="btn primary sm" onClick={endMonthClick}>End month ▸</button>
       </div>
@@ -116,6 +125,7 @@ function BoardResult({ index }: { index: number }) {
   if (!m) return null;
   const last = g.company.history[g.company.history.length - 1];
   const c = g.company;
+  const nextAsks = (g.asks ?? []).filter((a) => a.state === 'open' && g.people[a.directorId]);
   return (
     <Sheet title="Quarter closed">
       <div class="stat" style={{ marginBottom: '10px' }}>
@@ -124,6 +134,12 @@ function BoardResult({ index }: { index: number }) {
         <div><span class="label">Board</span><b>{Math.round(c.boardConfidence)}</b></div>
       </div>
       <MeetingView m={m} />
+      {nextAsks.length > 0 && (
+        <div class="card" style={{ padding: '10px 0 0', overflow: 'hidden' }}>
+          <div class="label" style={{ padding: '0 12px 6px' }}>Next quarter, the board wants</div>
+          <OpenAsks asks={nextAsks} />
+        </div>
+      )}
       <button class="btn primary block" onClick={closeSheet}>Continue</button>
     </Sheet>
   );
@@ -133,6 +149,7 @@ function renderSheet(s: SheetT, i: number) {
   switch (s.k) {
     case 'person': return <PersonSheet key={`${i}${s.id}`} id={s.id} />;
     case 'unit': return <UnitSheet key={`${i}${s.id}`} id={s.id} />;
+    case 'intro': return <IntroSheet key={i} />;
     case 'bonus': return <BonusSheet key={i} />;
     case 'endMonth': return <EndMonthSheet key={i} />;
     case 'boardResult': return <BoardResult key={i} index={s.index} />;

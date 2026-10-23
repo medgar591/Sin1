@@ -3,7 +3,7 @@ import { exportSave, importSave } from '../save';
 import { monthLabel } from '../sim/org';
 import { retire } from '../sim/actions';
 import { Btn, ConfirmBtn, Empty, PersonChip, Primer, Seg } from './common';
-import { errMsg, game, run, setGame, startGame, toast } from './store';
+import { errMsg, game, openSheet, run, setGame, startGame, toast } from './store';
 
 export function MoreView() {
   const [sub, setSub] = useState<'log' | 'settings'>('log');
@@ -56,6 +56,7 @@ function Settings() {
         <div class="label" style={{ marginBottom: '6px' }}>How a month works</div>
         <Primer />
       </div>
+      <button class="btn block" onClick={() => openSheet({ k: 'intro' })}>Replay the opening briefing</button>
       <div class="card stack">
         <div class="label">Export save</div>
         <Btn cls="block" onClick={async () => {

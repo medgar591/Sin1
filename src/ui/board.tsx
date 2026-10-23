@@ -1,13 +1,15 @@
 import { useState } from 'preact/hooks';
-import type { BoardMeeting, FixerKind } from '../sim/types';
+import type { BoardAsk, BoardMeeting, FixerKind } from '../sim/types';
 import { fullName, formatZuzu, monthLabel } from '../sim/org';
 import { lobbyDirector } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
 import { directorSupport } from '../sim/board';
+import { AGENDA_PLAIN, askProgress } from '../sim/asks';
 import { quoteFixerJob, startFixerJob, type FixerQuote, type FixerRequest } from '../sim/fixer';
 import { Btn, DivBar, Empty, PersonChip, PersonLink, Seg, signed, pct } from './common';
 import { PersonPicker, UnitPicker } from './pickers';
-import { game, run } from './store';
+import { Portrait } from './portrait';
+import { game, openPerson, run } from './store';
 
 const AGENDA: Record<string, string> = {
   growth: 'Wants growth', safety: 'Wants safety', dividends: 'Wants dividends', reform: 'Wants reform', oldGuard: 'Old guard',
@@ -17,15 +19,53 @@ const MOTION: Record<string, string> = {
   noConfidence: 'No confidence', replaceOfficer: 'Replace officer', cutBudget: 'Budget cut', commend: 'Commendation',
 };
 
+/** Open board asks with the director's face, what they want, and how it stands. Tap for the director. */
+export function OpenAsks({ asks }: { asks: BoardAsk[] }) {
+  const g = game();
+  return (
+    <div class="agenda">
+      {asks.map((a) => {
+        const d = g.people[a.directorId];
+        if (!d) return null;
+        const pr = askProgress(g, a);
+        return (
+          <button key={a.id} class="item agrow" onClick={() => openPerson(a.directorId)}>
+            <Portrait id={a.directorId} size={28} />
+            <span class="grow">
+              <span class="small dim" style={{ display: 'block' }}>{fullName(d)}</span>
+              <span style={{ display: 'block' }}>{a.text}</span>
+              <span class="small dim mono" style={{ display: 'block', marginTop: '2px' }}>{pr.label}</span>
+            </span>
+            <span class={`tag ${pr.met ? 'green' : 'amber'}`} style={{ flex: 'none' }}>{pr.met ? '✓ on track' : 'not yet'}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MeetingView({ m }: { m: BoardMeeting }) {
   const g = game();
   // The summary string repeats every motion after its headline; show only the headline.
   const cut = m.motions.length ? m.summary.indexOf(m.motions[0].summary) : -1;
-  const headline = cut > 0 ? m.summary.slice(0, cut).trim() : m.summary;
+  let headline = cut > 0 ? m.summary.slice(0, cut).trim() : m.summary;
+  // The asks are listed below; drop the sim's one-line tally of them.
+  if (m.asks?.length) headline = headline.replace(/\s*Directors' asks:[^.]*\.?/, '').trim();
   return (
     <div class="card">
       <div class="label">Board meeting · {monthLabel(m.month)}</div>
       <div style={{ margin: '4px 0 8px' }}>{headline}</div>
+      {m.asks && m.asks.length > 0 && (
+        <div style={{ borderTop: '1px solid var(--rule)', padding: '8px 0' }}>
+          <div class="label" style={{ marginBottom: '4px' }}>Directors’ asks</div>
+          {m.asks.map((a, i) => (
+            <div key={i} class="row" style={{ alignItems: 'flex-start', margin: '4px 0' }}>
+              <span class={`tag ${a.met ? 'green' : 'red'}`} style={{ flex: 'none' }}>{a.met ? '✓ met' : '✗ missed'}</span>
+              <div class="grow small"><b>{g.people[a.directorId]?.lastName ?? '?'}</b>: {a.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {m.motions.length === 0 && <div class="hint">No motions raised.</div>}
       {m.motions.map((mo) => {
         const votes = Object.entries(mo.votes);
@@ -62,13 +102,34 @@ export function BoardView() {
             if (!p) return null;
             let sup = 0;
             try { sup = directorSupport(g, d.personId); } catch { sup = 0; }
+            const ask = (g.asks ?? []).find((a) => a.state === 'open' && a.directorId === d.personId);
+            const pr = ask ? askProgress(g, ask) : null;
             return (
               <div class="card" key={d.personId}>
                 <div class="row" style={{ justifyContent: 'space-between' }}>
-                  <div><PersonLink id={d.personId} /> {p.role === 'chair' && <span class="tag cyan">chair</span>}</div>
-                  <span class="mono small" style={{ color: sup < 0 ? 'var(--red)' : 'var(--green)' }}>{signed(sup)}</span>
+                  <Portrait id={d.personId} size={40} onClick={() => openPerson(d.personId)} />
+                  <div class="grow">
+                    <div><PersonLink id={d.personId} /> {p.role === 'chair' && <span class="tag cyan">chair</span>}</div>
+                    <div class="small dim">{AGENDA[d.agenda] ?? d.agenda} · {p.title}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div class="mono" style={{ color: sup < 0 ? 'var(--red)' : 'var(--green)' }}>{signed(sup)}</div>
+                    <div class="small dim">support</div>
+                  </div>
                 </div>
-                <div class="small dim" style={{ marginBottom: '6px' }}>{AGENDA[d.agenda] ?? d.agenda}</div>
+                <div class="small" style={{ margin: '8px 0 6px', color: 'var(--text)', opacity: 0.85 }}>{p.lastName} {AGENDA_PLAIN[d.agenda] ?? ''}.</div>
+                {ask && pr && (
+                  <div class="askbox" style={{ marginBottom: '8px' }}>
+                    <div class="row" style={{ alignItems: 'flex-start' }}>
+                      <div class="grow">
+                        <div class="label">Asks this quarter · by {monthLabel(ask.dueMonth)}</div>
+                        <div style={{ fontSize: '13px', marginTop: '2px' }}>{ask.text}</div>
+                        <div class="small dim mono" style={{ marginTop: '2px' }}>{pr.label}</div>
+                      </div>
+                      <span class={`tag ${pr.met ? 'green' : 'amber'}`} style={{ flex: 'none' }}>{pr.met ? '✓ on track' : 'not yet'}</span>
+                    </div>
+                  </div>
+                )}
                 <DivBar value={sup} />
                 <div class="grid2" style={{ marginTop: '10px', gridTemplateColumns: 'repeat(3,1fr)' }}>
                   <Btn cls="sm" cost={ATTENTION_COST.lobbyDirector} onClick={() => run((s) => lobbyDirector(s, d.personId, 'persuade'))}>Persuade</Btn>

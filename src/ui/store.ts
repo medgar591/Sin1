@@ -13,6 +13,7 @@ export type Sheet =
   | { k: 'person'; id: PersonId }
   | { k: 'unit'; id: UnitId }
   | { k: 'bonus' }
+  | { k: 'intro' }
   | { k: 'endMonth' }
   | { k: 'boardResult'; index: number }
   | { k: 'scene'; speakerId: PersonId; line: string; message: string; ok: boolean };

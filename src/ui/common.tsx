@@ -257,6 +257,10 @@ export function Primer() {
   return (
     <div class="small" style={{ lineHeight: 1.5 }}>
       <p style={{ margin: '0 0 6px' }}>
+        <b>Your job:</b> hit the guidance you announce, satisfy the directors' quarterly asks, and keep board confidence above 30.
+        Your chief of staff's agenda on the dashboard lists what needs you.
+      </p>
+      <p style={{ margin: '0 0 6px' }}>
         Each month you have <b>{n} attention</b> (the dots at the top). Meeting, hiring, firing, promoting, demoting, reassigning,
         investigating, restructuring, lobbying and fixer jobs each cost one. Pay, options, budgets, guidance and bonuses are free.
       </p>

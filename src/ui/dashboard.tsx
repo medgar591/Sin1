@@ -1,37 +1,26 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { GameState, PersonId } from '../sim/types';
 import { formatZuzu, peopleUnder, fullName, isActive } from '../sim/org';
-import { allocateBonus, setGuidance } from '../sim/actions';
+import { allocateBonus } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
-import { suggestedGuidance } from '../sim/economy';
-import { Bar, Btn, Primer, Sheet, Stepper, levelClass, zuzuPrice } from './common';
+import { Bar, Btn, Sheet, Stepper, levelClass, zuzuPrice } from './common';
+import { AgendaCard, AsksCard, LastMonthCard, QuarterCard } from './agenda';
+import { introSeen } from './intro';
 import { Chart } from './charts';
-import { closeSheet, game, goOrg, openPerson, openSheet, run } from './store';
-
-const TIP_KEY = 'sin1.tip.v1';
-function tipSeen(): boolean {
-  try { return localStorage.getItem(TIP_KEY) === '1'; } catch { return false; }
-}
-
-function FirstRun() {
-  const [open, setOpen] = useState(() => !tipSeen());
-  if (!open) return null;
-  return (
-    <div class="card" style={{ marginTop: '10px', borderColor: 'var(--cyan)' }}>
-      <div class="label cyan" style={{ marginBottom: '6px' }}>How a month works</div>
-      <Primer />
-      <button class="btn sm" style={{ marginTop: '10px' }} onClick={() => { try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ } setOpen(false); }}>Got it</button>
-    </div>
-  );
-}
+import { closeSheet, game, goOrg, openPerson, openSheet, run, S } from './store';
 
 export function Dashboard() {
   const g = game();
   const h = g.company.history.slice(-24);
+  useEffect(() => {
+    if (g.month === 0 && !introSeen(g.seed) && !S.sheets.some((x) => x.k === 'intro')) openSheet({ k: 'intro' });
+  }, []);
   return (
     <div>
-      {g.month < 3 && <FirstRun />}
-      <Guidance />
+      <div style={{ height: '10px' }} />
+      <AgendaCard />
+      <QuarterCard />
+      <AsksCard />
       {g.company.bonusPool > 0 && (
         <div class="card warn">
           <div class="label amber">Bonus pool</div>
@@ -42,6 +31,7 @@ export function Dashboard() {
           <div class="hint">Unallocated money returns to company cash.</div>
         </div>
       )}
+      <LastMonthCard />
       <h2>Divisions</h2>
       {Object.values(g.divisions).map((d) => {
         const u = g.units[d.unitId];
@@ -80,35 +70,6 @@ export function Dashboard() {
       <Chart title="Profit / month" values={h.map((r) => r.profit)} format={formatZuzu} bars />
       <Chart title="Share price" values={h.map((r) => r.sharePrice)} format={zuzuPrice} color="var(--amber)" />
       <Chart title="Board confidence" values={h.map((r) => r.boardConfidence)} format={(n) => n.toFixed(0)} color="var(--green)" threshold={30} fixedMin={0} fixedMax={100} />
-    </div>
-  );
-}
-
-function Guidance() {
-  const g = game();
-  const [amount, setAmount] = useState<number | null>(null);
-  const cur = g.company.guidance;
-  if (cur !== null) {
-    return (
-      <div class="card">
-        <div class="label">Quarterly guidance</div>
-        <div class="mono" style={{ fontSize: '18px' }}>Profit target {formatZuzu(cur)}</div>
-        <div class="hint">Announced. The board and the market will judge this quarter against it.</div>
-      </div>
-    );
-  }
-  let suggested = 0;
-  try { suggested = suggestedGuidance(g); } catch { suggested = 0; }
-  const val = amount ?? suggested;
-  const step = Math.max(10000, Math.round(Math.abs(suggested) * 0.05 / 10000) * 10000);
-  return (
-    <div class="card warn">
-      <div class="label amber">Announce guidance</div>
-      <div class="hint" style={{ marginBottom: '8px' }}>Set a profit target for this quarter. Beat it and the stock rises; miss it and confidence falls.</div>
-      <Stepper value={val} step={step} onChange={setAmount} format={formatZuzu} min={-1e12} />
-      <div style={{ marginTop: '8px' }}>
-        <Btn cls="primary block" cost={ATTENTION_COST.setGuidance} onClick={() => run((s) => setGuidance(s, val))}>Announce {formatZuzu(val)}</Btn>
-      </div>
     </div>
   );
 }
