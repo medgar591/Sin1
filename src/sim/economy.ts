@@ -1,6 +1,6 @@
 // Turns people and units into numbers: performance, unit output, morale,
 // division revenue and costs, cash, quarterly earnings, share price.
-import type { GameState, OrgUnit, Person, UnitId } from './types';
+import type { GameState, OrgUnit, Person, PersonId, UnitId } from './types';
 import {
   activeStaff,
   addLog,
@@ -566,6 +566,21 @@ export function estimatedMonthlyCosts(state: GameState): number {
 /** Estimated monthly profit when there is no history yet. */
 export function estimatedMonthlyProfit(state: GameState): number {
   return estimatedMonthlyRevenue(state) - estimatedMonthlyCosts(state);
+}
+
+const BONUS_HIGH_PERFORMER = 70;
+const BONUS_WEIGHT = { officer: 3, divisionHead: 2.5, performer: 1 } as const;
+
+/** Who expects a share of the bonus pool, and how big a share (relative weights): officers, division heads and high performers. */
+export function bonusWeights(state: GameState): Map<PersonId, number> {
+  const weights = new Map<PersonId, number>();
+  for (const p of activeStaff(state)) {
+    if (p.id === state.player.personId) continue;
+    if (p.role === 'officer') weights.set(p.id, BONUS_WEIGHT.officer);
+    else if (p.role === 'divisionHead') weights.set(p.id, BONUS_WEIGHT.divisionHead);
+    else if (p.performance >= BONUS_HIGH_PERFORMER) weights.set(p.id, BONUS_WEIGHT.performer);
+  }
+  return weights;
 }
 
 /** The default guidance is the run-rate less this much caution. */

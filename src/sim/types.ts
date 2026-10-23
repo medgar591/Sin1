@@ -487,8 +487,8 @@ export interface GameState {
   /** The officer who was passed over for the CEO's chair, if known (new games only). */
   rivalId?: PersonId | null;
   /**
-   * The quarter the company ran under the predecessor CEO before the game began
-   * (new games only). The player's score is measured from the handover.
+   * The year (2089) the company ran under the predecessor CEO before the game
+   * began (new games only). The player's score is measured from the handover.
    */
   prequel?: Prequel;
 }
@@ -503,6 +503,9 @@ export interface Prequel {
   guidance: number | null;
   /** The month that closed that quarter. */
   quarterMonth: Month;
+  /** Profit across the predecessor's four quarters, and the share price when the year opened (games from before the full-year prequel lack both). */
+  yearProfit?: number;
+  yearStartSharePrice?: number;
 }
 
 export type AskKind = 'revenueGrowth' | 'margin' | 'fillSeats' | 'costControl' | 'shakeUp' | 'noPurge';

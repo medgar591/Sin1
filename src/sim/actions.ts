@@ -14,9 +14,9 @@ import type {
   UnitKind,
 } from './types';
 import { createPerson } from './generate';
+import { bonusWeights } from './economy';
 import { endGame } from './epilogue';
 import {
-  activeStaff,
   addLifeEvent,
   addLog,
   adjustLoyalty,
@@ -90,8 +90,6 @@ const PROMOTION_RAISE_MAX = 20;
 const DEMOTION_PAY_CUT = 0.1;
 const PASSED_OVER_AMBITION = 55;
 
-const BONUS_HIGH_PERFORMER = 70;
-const BONUS_WEIGHT = { officer: 3, divisionHead: 2.5, performer: 1 } as const;
 const OPTION_GRANT_MAX_FRACTION = 0.005;
 
 const PROMISE_LOYALTY = 10;
@@ -456,13 +454,7 @@ export function allocateBonus(state: GameState, allocations: Record<string, numb
   if (blocked) return blocked;
 
   // Who expects a share, and roughly how big.
-  const weights = new Map<PersonId, number>();
-  for (const p of activeStaff(state)) {
-    if (p.id === state.player.personId) continue;
-    if (p.role === 'officer') weights.set(p.id, BONUS_WEIGHT.officer);
-    else if (p.role === 'divisionHead') weights.set(p.id, BONUS_WEIGHT.divisionHead);
-    else if (p.performance >= BONUS_HIGH_PERFORMER) weights.set(p.id, BONUS_WEIGHT.performer);
-  }
+  const weights = bonusWeights(state);
   const weightSum = sum([...weights.values()]);
   let snubbed = 0;
   for (const [id, w] of weights) {

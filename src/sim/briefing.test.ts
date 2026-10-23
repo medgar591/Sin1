@@ -32,7 +32,7 @@ describe('openingBriefing', () => {
     }
   });
 
-  it('tells the new CEO about the predecessor and the quarter they left behind', () => {
+  it('tells the new CEO about the predecessor, their year and the quarter they left behind', () => {
     for (const seed of [1, 2, 3]) {
       const state = newGame(seed);
       const pre = state.prequel!;
@@ -40,6 +40,9 @@ describe('openingBriefing', () => {
       const text = openingBriefing(state).paragraphs.join('\n');
       expect(text).toContain(`${fullName(old)} ran the company for`);
       expect(text).toContain('retired at the end of December');
+      expect(text).toContain(`In 2089 it made ${formatZuzu(pre.yearProfit!)} across four quarters`);
+      expect(text).toContain(`from ${formatZuzu(pre.yearStartSharePrice!)} to ${formatZuzu(pre.sharePrice)}`);
+      expect(pre.yearProfit).toBeGreaterThan(pre.profit);
       expect(text).toContain('Q4 2089');
       expect(text).toContain(formatZuzu(pre.profit));
       expect(text).toContain(`guidance of ${formatZuzu(pre.guidance!)}`);
@@ -47,6 +50,15 @@ describe('openingBriefing', () => {
       expect(text).toContain(`The board now expects at least ${formatZuzu(boardExpectation(state)!)} a quarter`);
       if (state.company.bonusPool > 0) expect(text).toContain(`${formatZuzu(state.company.bonusPool)}, was left unallocated`);
     }
+  });
+
+  it('falls back to the last quarter alone for a game saved before the full-year prequel', () => {
+    const state = newGame(2);
+    delete state.prequel!.yearProfit;
+    delete state.prequel!.yearStartSharePrice;
+    const text = openingBriefing(state).paragraphs.join('\n');
+    expect(text).not.toContain('In 2089');
+    expect(text).toContain(`Last quarter (Q4 2089) the company made ${formatZuzu(state.prequel!.profit)}`);
   });
 
   it('skips the predecessor in a game that began without one', () => {

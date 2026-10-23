@@ -55,7 +55,12 @@ export function openingBriefing(state: GameState): Briefing {
         ? 'with no guidance given'
         : `against guidance of ${formatZuzu(pre.guidance)}, ${pre.profit >= pre.guidance ? 'beating' : 'missing'} it`;
     const bar = boardExpectation(state);
-    let past = `${fullName(predecessor)} ran the company for ${years} years and retired at the end of December. Last quarter (${quarterLabel(pre.quarterMonth)}) the company made ${formatZuzu(pre.profit)} ${result}.`;
+    let past = `${fullName(predecessor)} ran the company for ${years} years and retired at the end of December.`;
+    if (pre.yearProfit !== undefined && pre.yearStartSharePrice !== undefined) {
+      past += ` In 2089 it made ${formatZuzu(pre.yearProfit)} across four quarters, and the share price went from ${formatZuzu(pre.yearStartSharePrice)} to ${formatZuzu(pre.sharePrice)}. The last quarter (${quarterLabel(pre.quarterMonth)}) closed at ${formatZuzu(pre.profit)} ${result}.`;
+    } else {
+      past += ` Last quarter (${quarterLabel(pre.quarterMonth)}) the company made ${formatZuzu(pre.profit)} ${result}.`;
+    }
     past += bar !== null
       ? ` The board now expects at least ${formatZuzu(bar)} a quarter; that is the bar it holds you to.`
       : ' That is the bar the board holds you to.';

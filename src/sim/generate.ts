@@ -26,10 +26,12 @@ import {
   addLifeEvent,
   addLog,
   addSecret,
+  adjustSatisfaction,
   bossOf,
   formatZuzu,
   fullName,
   headcount,
+  isQuarterEnd,
   monthLabel,
   newId,
   peopleUnder,
@@ -42,10 +44,10 @@ import {
 } from './org';
 import { baseName, marketSalary, roleRank, salaryBand } from './roles';
 import { issueAsks } from './asks';
-import { closeQuarter, computeOutputs, runEconomyMonth, suggestedGuidance, type QuarterResult } from './economy';
+import { bonusWeights, closeQuarter, computeOutputs, runEconomyMonth, suggestedGuidance, type QuarterResult } from './economy';
 import { runNpcMonth } from './npc';
 import { runWorldNews } from './events';
-import { clamp } from './util';
+import { clamp, sum } from './util';
 import { chance, gaussian, pick, randInt, random, shuffle, weightedPick } from './rng';
 import {
   CLIQUE_AGENDAS,
@@ -124,8 +126,10 @@ const MENTOR_RATE = 0.07;
 const SECRET_BASE = 0.03;
 const SECRET_SCALE = 0.2;
 
-/** The months the company runs under the predecessor before the player takes over: one quarter, Oct to Dec 2089. */
-const PREQUEL_MONTHS = 3;
+/** The months the company runs under the predecessor before the player takes over: all of 2089, four closed quarters. */
+const PREQUEL_MONTHS = 12;
+/** The predecessor's guidance for each later quarter is the run-rate suggestion times a draw from this range: sometimes bold, sometimes cautious. */
+const PREDECESSOR_GUIDE: [number, number] = [0.97, 1.07];
 const PREDECESSOR_AGE: [number, number] = [58, 66];
 const PREDECESSOR_TENURE_YEARS: [number, number] = [6, 12];
 
@@ -772,17 +776,52 @@ function guidanceVerdict(surprise: number): string {
   return pct === 0 ? 'on the nose' : `${surprise >= 0 ? 'beat' : 'missed'} by ${pct}%`;
 }
 
+/** "Q2 2089: profit 2.5M against guidance 2.4M (beat by 4%)." */
+function quarterSummary(quarter: QuarterResult): string {
+  const result =
+    quarter.guidance === null || quarter.surprise === null
+      ? `with no guidance given`
+      : `against guidance ${formatZuzu(quarter.guidance)} (${guidanceVerdict(quarter.surprise)})`;
+  return `${quarterLabel(quarter.month)}: profit ${formatZuzu(quarter.profit)} ${result}.`;
+}
+
 /**
- * Runs the company for one quarter (Oct to Dec 2089) under the predecessor, so
- * the player inherits real history: three monthly records, a closed quarter
- * with a share price move, and an NPC world that already has a few months of
- * hires, departures and feuds. Nothing from this era reaches the inbox, and
- * nothing is credited to the player.
+ * The predecessor pays out a closed quarter's bonus pool as a plain fair split,
+ * the way the player's allocation would score as "fair": everyone who expects a
+ * share gets their weighted portion. Nothing is credited to the player.
  */
-function runPrequel(state: GameState, player: Person, predecessor: Person): QuarterResult {
+function payPredecessorBonuses(state: GameState, predecessor: Person): void {
+  const pool = state.company.bonusPool;
+  const weights = bonusWeights(state);
+  const weightSum = sum([...weights.values()]);
+  if (!(pool > 0) || weightSum <= 0) return;
+  let paid = 0;
+  for (const [id, w] of weights) {
+    const p = state.people[id];
+    const amount = Math.round((pool * w) / weightSum);
+    const frac = amount / Math.max(1, p.salary);
+    adjustSatisfaction(state, id, clamp(frac * 40 * (0.5 + p.greed / 100), 1, 10));
+    addLifeEvent(state, id, 'bonus', `Awarded a ${formatZuzu(amount)} bonus by ${fullName(predecessor)}.`, clamp(Math.round(frac * 10), 1, 3), false);
+    paid += amount;
+  }
+  state.company.bonusPool = 0;
+  addLog(state, `${fullName(predecessor)} paid out the ${quarterLabel(state.month)} bonus pool: ${formatZuzu(paid)} across ${weights.size} people.`, 1, [predecessor.id]);
+}
+
+/**
+ * Runs the company for all of 2089 (Jan to Dec) under the predecessor, so the
+ * player inherits real history: twelve monthly records, four closed quarters
+ * with share price moves, and an NPC world that has had a year of hires,
+ * departures and feuds. Each quarter the predecessor guides and the board
+ * meets on paper (no motions, no asks); the first three bonus pools are paid
+ * out, the last is left for the player. Nothing from this era reaches the
+ * inbox, and nothing is credited to the player.
+ */
+function runPrequel(state: GameState, player: Person, predecessor: Person): { quarters: QuarterResult[]; startSharePrice: number } {
   // The CEO's pay and the dividend go to whoever holds the chair and the stake: not the player yet.
   const personalCash = state.player.personalCash;
-  let quarter: QuarterResult | null = null;
+  const startSharePrice = state.company.sharePrice;
+  const quarters: QuarterResult[] = [];
 
   for (let m = -PREQUEL_MONTHS; m < 0; m++) {
     state.month = m;
@@ -792,25 +831,30 @@ function runPrequel(state: GameState, player: Person, predecessor: Person): Quar
     runEconomyMonth(state);
     // The books are only open once the first month is in; the predecessor guides from that run-rate.
     if (m === -PREQUEL_MONTHS) state.company.guidance = suggestedGuidance(state);
-    if (m === -1) quarter = closeQuarter(state);
+    if (isQuarterEnd(m)) {
+      const quarter = closeQuarter(state);
+      quarters.push(quarter);
+      const last = m === -1;
+      const meeting: BoardMeeting = {
+        month: m,
+        motions: [],
+        summary: last
+          ? `${quarterSummary(quarter)} The board accepted ${fullName(predecessor)}'s retirement and appointed ${fullName(player)}.`
+          : quarterSummary(quarter),
+      };
+      state.boardMeetings.push(meeting);
+      addLog(state, `Board meeting: ${meeting.summary}`, 3, last ? [predecessor.id, player.id] : [predecessor.id]);
+      if (!last) {
+        payPredecessorBonuses(state, predecessor);
+        // The next quarter's guidance: the run-rate suggestion, bolder or more cautious by turns.
+        const [lo, hi] = PREDECESSOR_GUIDE;
+        state.company.guidance = Math.round((suggestedGuidance(state) * (lo + random(state) * (hi - lo))) / 50_000) * 50_000;
+      }
+    }
     state.incidents = [];
   }
   state.player.personalCash = personalCash;
-  if (!quarter) throw new Error('the prequel closed no quarter');
-
-  const q = quarterLabel(quarter.month);
-  const result =
-    quarter.guidance === null || quarter.surprise === null
-      ? `with no guidance given`
-      : `against guidance ${formatZuzu(quarter.guidance)} (${guidanceVerdict(quarter.surprise)})`;
-  const meeting: BoardMeeting = {
-    month: quarter.month,
-    motions: [],
-    summary: `${q}: profit ${formatZuzu(quarter.profit)} ${result}. The board accepted ${fullName(predecessor)}'s retirement and appointed ${fullName(player)}.`,
-  };
-  state.boardMeetings.push(meeting);
-  addLog(state, `Board meeting: ${meeting.summary}`, 3, [predecessor.id, player.id]);
-  return quarter;
+  return { quarters, startSharePrice };
 }
 
 /** The predecessor retires and the player takes the chair at month 0. */
@@ -819,9 +863,10 @@ function handOver(
   player: Person,
   predecessor: Person,
   tenureYears: number,
-  quarter: QuarterResult,
+  year: { quarters: QuarterResult[]; startSharePrice: number },
   freshConfidence: number,
 ): void {
+  const quarter = year.quarters[year.quarters.length - 1];
   const rootId = state.rootUnitId;
   const churn = state.unitChurn[rootId];
 
@@ -856,6 +901,8 @@ function handOver(
     profit: quarter.profit,
     guidance: quarter.guidance,
     quarterMonth: quarter.month,
+    yearProfit: sum(year.quarters.map((q) => q.profit)),
+    yearStartSharePrice: year.startSharePrice,
   };
   addLog(
     state,
@@ -1010,8 +1057,8 @@ export function generateGame(seed: number, opts: NewGameOptions): GameState {
   assignSecrets(state, staff);
   buildCliques(state, staff, antagonist);
 
-  const quarter = runPrequel(state, ceo, predecessor);
-  handOver(state, ceo, predecessor, tenureYears, quarter, freshConfidence);
+  const year = runPrequel(state, ceo, predecessor);
+  handOver(state, ceo, predecessor, tenureYears, year, freshConfidence);
   issueAsks(state);
   return state;
 }
