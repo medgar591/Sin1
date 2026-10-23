@@ -15,7 +15,7 @@ export const KIND_LABEL: Record<UnitKind, string> = {
 
 export const clampN = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 export const signed = (n: number) => (n > 0 ? `+${Math.round(n)}` : `${Math.round(n)}`);
-export const zuzuPrice = (n: number) => `ㄓ${n.toFixed(2)}`;
+export const zuzuPrice = (n: number) => `${n.toFixed(2)}ㄓ`;
 export const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
 
 export function levelClass(v: number, warn = 45, bad = 30): '' | 'a' | 'r' {

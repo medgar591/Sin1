@@ -648,7 +648,7 @@ function makeSecret(state: GameState, p: Person, others: Person[]): Secret {
   switch (kind) {
     case 'embezzlement': {
       const amount = randInt(state, 8, 140) * 5_000;
-      description = `Skimmed about ㄓ${Math.round(amount / 1000)}K through padded vendor invoices.`;
+      description = `Skimmed about ${Math.round(amount / 1000)}Kㄓ through padded vendor invoices.`;
       if (chance(state, 0.3)) {
         const o = other();
         involved.push(o.id);

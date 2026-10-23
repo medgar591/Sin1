@@ -271,12 +271,12 @@ export function isQuarterEnd(month: Month): boolean {
   return month % 3 === 2;
 }
 
-/** Formats zuzu compactly: ㄓ1.2M, ㄓ340K. */
+/** Formats zuzu compactly, symbol after the number: 1.2Mㄓ, 340Kㄓ. */
 export function formatZuzu(amount: number): string {
   const sign = amount < 0 ? '-' : '';
   const a = Math.abs(amount);
-  if (a >= 1e9) return `${sign}ㄓ${(a / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${sign}ㄓ${(a / 1e6).toFixed(1)}M`;
-  if (a >= 1e3) return `${sign}ㄓ${Math.round(a / 1e3)}K`;
-  return `${sign}ㄓ${Math.round(a)}`;
+  if (a >= 1e9) return `${sign}${(a / 1e9).toFixed(2)}Bㄓ`;
+  if (a >= 1e6) return `${sign}${(a / 1e6).toFixed(1)}Mㄓ`;
+  if (a >= 1e3) return `${sign}${Math.round(a / 1e3)}Kㄓ`;
+  return `${sign}${Math.round(a)}ㄓ`;
 }
