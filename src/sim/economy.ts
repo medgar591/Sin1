@@ -390,7 +390,10 @@ export function closeQuarter(state: GameState): QuarterResult {
     share = 0.1;
     why = 'no guidance given, 10% of profit';
   }
+  // The pool is set aside from cash; an unspent pool from last quarter goes back first.
+  co.cash += co.bonusPool;
   co.bonusPool = Math.round(Math.max(0, profit) * share);
+  co.cash -= co.bonusPool;
   co.guidance = null;
 
   const g = guidance === null ? 'no guidance' : `guidance ${formatZuzu(guidance)}`;
