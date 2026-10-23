@@ -1,12 +1,12 @@
 import { useState } from 'preact/hooks';
 import type { BoardAsk, BoardMeeting, FixerKind } from '../sim/types';
 import { fullName, formatZuzu, monthLabel, shortName } from '../sim/org';
-import { lobbyDirector } from '../sim/actions';
+import { FAVOR_COST, lobbyDirector } from '../sim/actions';
 import { ATTENTION_COST } from '../sim/attention';
 import { directorSupport } from '../sim/board';
 import { AGENDA_PLAIN, askProgress } from '../sim/asks';
 import { quoteFixerJob, startFixerJob, type FixerQuote, type FixerRequest } from '../sim/fixer';
-import { Btn, DivBar, Empty, PersonChip, PersonLink, Seg, signed, pct } from './common';
+import { Btn, ConfirmBtn, DivBar, Empty, PersonChip, PersonLink, Seg, signed, pct } from './common';
 import { PersonPicker, UnitPicker } from './pickers';
 import { Portrait } from './portrait';
 import { game, openPerson, run } from './store';
@@ -19,25 +19,59 @@ const MOTION: Record<string, string> = {
   noConfidence: 'No confidence', replaceOfficer: 'Replace officer', cutBudget: 'Budget cut', commend: 'Commendation',
 };
 
-/** Open board asks with the director's face, what they want, and how it stands. Tap for the director. */
-export function OpenAsks({ asks }: { asks: BoardAsk[] }) {
+/** "Solomona", "Solomona & Dasgupta", "Solomona, Dasgupta & Okafor" as a row of name buttons. */
+function Names({ ids }: { ids: string[] }) {
   const g = game();
   return (
+    <>
+      {ids.map((id, i) => (
+        <span key={id}>
+          {i > 0 && (i === ids.length - 1 ? ' & ' : ', ')}
+          <button type="button" class="link" onClick={() => openPerson(id)}>{shortName(g.people[id])}</button>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** Open board asks with the director's face, what they want, and how it stands. Tap for the director. Directors who carry the same ask share one row. */
+export function OpenAsks({ asks }: { asks: BoardAsk[] }) {
+  const g = game();
+  const groups: BoardAsk[][] = [];
+  for (const a of asks) {
+    if (!g.people[a.directorId]) continue;
+    const same = groups.find((x) => x[0].text === a.text);
+    if (same) same.push(a); else groups.push([a]);
+  }
+  return (
     <div class="agenda">
-      {asks.map((a) => {
-        const d = g.people[a.directorId];
-        if (!d) return null;
+      {groups.map((grp) => {
+        const a = grp[0];
         const pr = askProgress(g, a);
+        const tag = <span class={`tag ${pr.met ? 'green' : 'amber'}`} style={{ flex: 'none' }}>{pr.met ? '✓ on track' : 'not yet'}</span>;
+        if (grp.length === 1) {
+          return (
+            <button key={a.id} class="item agrow" onClick={() => openPerson(a.directorId)}>
+              <Portrait id={a.directorId} size={28} />
+              <span class="grow">
+                <span class="small dim" style={{ display: 'block' }}>{fullName(g.people[a.directorId])}</span>
+                <span style={{ display: 'block' }}>{a.text}</span>
+                <span class="small dim mono" style={{ display: 'block', marginTop: '2px' }}>{pr.label}</span>
+              </span>
+              {tag}
+            </button>
+          );
+        }
         return (
-          <button key={a.id} class="item agrow" onClick={() => openPerson(a.directorId)}>
-            <Portrait id={a.directorId} size={28} />
+          <div key={a.id} class="item agrow multi">
+            <span class="pstack">{grp.map((x) => <Portrait key={x.id} id={x.directorId} size={28} />)}</span>
             <span class="grow">
-              <span class="small dim" style={{ display: 'block' }}>{fullName(d)}</span>
+              <span class="small dim" style={{ display: 'block' }}><Names ids={grp.map((x) => x.directorId)} /> want:</span>
               <span style={{ display: 'block' }}>{a.text}</span>
               <span class="small dim mono" style={{ display: 'block', marginTop: '2px' }}>{pr.label}</span>
             </span>
-            <span class={`tag ${pr.met ? 'green' : 'amber'}`} style={{ flex: 'none' }}>{pr.met ? '✓ on track' : 'not yet'}</span>
-          </button>
+            {tag}
+          </div>
         );
       })}
     </div>
@@ -51,6 +85,12 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
   let headline = cut > 0 ? m.summary.slice(0, cut).trim() : m.summary;
   // The asks are listed below; drop the sim's one-line tally of them.
   if (m.asks?.length) headline = headline.replace(/\s*Directors' asks:[^.]*\.?/, '').trim();
+  // Directors who carried the same ask and met or missed it together share a line.
+  const askGroups: NonNullable<BoardMeeting['asks']>[] = [];
+  for (const a of m.asks ?? []) {
+    const same = askGroups.find((x) => x[0].text === a.text && x[0].met === a.met);
+    if (same) same.push(a); else askGroups.push([a]);
+  }
   return (
     <div class="card">
       <div class="label">Board meeting · {monthLabel(m.month)}</div>
@@ -58,10 +98,10 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
       {m.asks && m.asks.length > 0 && (
         <div style={{ borderTop: '1px solid var(--rule)', padding: '8px 0' }}>
           <div class="label" style={{ marginBottom: '4px' }}>Directors’ asks</div>
-          {m.asks.map((a, i) => (
-            <div key={i} class="row" style={{ alignItems: 'flex-start', margin: '4px 0' }}>
-              <span class={`tag ${a.met ? 'green' : 'red'}`} style={{ flex: 'none' }}>{a.met ? '✓ met' : '✗ missed'}</span>
-              <div class="grow small"><b>{g.people[a.directorId] ? shortName(g.people[a.directorId]) : '?'}</b>: {a.text}</div>
+          {askGroups.map((grp) => (
+            <div key={grp[0].directorId + grp[0].text} class="row" style={{ alignItems: 'flex-start', margin: '4px 0' }}>
+              <span class={`tag ${grp[0].met ? 'green' : 'red'}`} style={{ flex: 'none' }}>{grp[0].met ? '✓ met' : '✗ missed'}</span>
+              <div class="grow small"><b>{grp.map((a) => (g.people[a.directorId] ? shortName(g.people[a.directorId]) : '?')).join(' & ')}</b>: {grp[0].text}</div>
             </div>
           ))}
         </div>
@@ -69,20 +109,63 @@ export function MeetingView({ m }: { m: BoardMeeting }) {
       {m.motions.length === 0 && <div class="hint">No motions raised.</div>}
       {m.motions.map((mo) => {
         const votes = Object.entries(mo.votes);
-        const yes = votes.filter(([, v]) => v);
-        const no = votes.filter(([, v]) => !v);
+        const yes = votes.filter(([, v]) => v).map(([id]) => id);
+        const no = votes.filter(([, v]) => !v).map(([id]) => id);
+        const names = (ids: string[]) => (ids.length ? ids.map((id) => (g.people[id] ? shortName(g.people[id]) : '?')).join(', ') : 'nobody');
+        // Commendations help the CEO when they pass; every other motion helps when it is defeated.
+        const good = mo.passed === (mo.kind === 'commend');
+        const sense = mo.kind === 'commend'
+          ? (mo.passed ? 'Good for you: the board commended you.' : 'Against you: the board withheld the commendation.')
+          : (mo.passed ? 'Against you: the motion carried.' : 'Good for you: the motion was defeated.');
         return (
           <div key={mo.id} style={{ borderTop: '1px solid var(--rule)', padding: '8px 0' }}>
-            <div class="row"><b class="grow">{mo.summary}</b><span class={`tag ${mo.passed === (mo.kind === 'commend') ? 'green' : 'red'}`} style={{ flex: 'none' }}>{mo.passed ? 'passed' : 'failed'}</span></div>
+            <div class="row"><b class="grow">{mo.summary}</b><span class={`tag ${good ? 'green' : 'red'}`} style={{ flex: 'none' }}>{mo.passed ? '✓ passed' : '✗ defeated'}</span></div>
             <div class="small dim">{MOTION[mo.kind] ?? mo.kind} · proposed by {g.people[mo.proposerId] ? fullName(g.people[mo.proposerId]) : '?'}</div>
-            <div class="small mono">{yes.length} for · {no.length} against</div>
-            <div class="small dim">
-              {votes.map(([id, v]) => `${g.people[id] ? shortName(g.people[id]) : '?'} ${v ? '✓' : '✗'}`).join('  ')}
-            </div>
+            <div class="small"><span class={good ? 'green' : 'red'}>{sense}</span></div>
+            <div class="small mono">Vote {yes.length}–{no.length}{yes.length === no.length ? ', the chair broke the tie' : ''}</div>
+            <div class="small dim">For: {names(yes)}. Against: {names(no)}.</div>
           </div>
         );
       })}
     </div>
+  );
+}
+
+/** The three ways to work a director, with what each will do to this one. */
+function Lobby({ id }: { id: string }) {
+  const g = game();
+  const d = g.people[id];
+  const cost = ATTENTION_COST.lobbyDirector;
+  const name = shortName(d);
+  const cash = g.player.personalCash;
+  const broke = cash < FAVOR_COST;
+  const secret = d.secrets.filter((x) => x.revealed).sort((a, b) => b.severity - a.severity)[0];
+  const pressure = () => run((s) => lobbyDirector(s, id, 'pressure'));
+  return (
+    <>
+      <div class="lobbybtns">
+        <Btn cls="sm" cost={cost} onClick={() => run((s) => lobbyDirector(s, id, 'persuade'))}>Persuade</Btn>
+        <Btn cls="sm" cost={cost} disabled={broke} title={broke ? 'Not enough personal cash' : undefined} onClick={() => run((s) => lobbyDirector(s, id, 'favor'))}>Favor</Btn>
+        {secret
+          ? <Btn cls="sm warn" cost={cost} onClick={pressure}>Pressure</Btn>
+          : <ConfirmBtn label="Pressure" confirmLabel="Confirm" cls="sm warn" cost={cost} onClick={pressure} />}
+      </div>
+      <div class="lobby small dim">
+        <div><b>Persuade:</b> walk {name} through the numbers. Builds goodwill, and more of it after good results.</div>
+        <div>
+          <b>Favor:</b> costs {formatZuzu(FAVOR_COST)} of your own cash{broke ? ` (you have ${formatZuzu(cash)})` : ''}.{' '}
+          {d.traits.includes('principled')
+            ? <span class="amber">{name} is principled: expect it to be taken as a bribe, and support to drop.</span>
+            : 'Works best on a greedy director.'}
+        </div>
+        <div>
+          <b>Pressure:</b>{' '}
+          {secret
+            ? <>uses what you hold on {name}. Leverage: {secret.description}</>
+            : <span class="amber">you hold nothing on {name}. It will backfire: support drops and board confidence falls. Find leverage first (Fixer, Dirt).</span>}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -97,6 +180,7 @@ export function BoardView() {
       {sub === 'board' ? (
         <>
           <h2>Directors <span class="mono">confidence {Math.round(g.company.boardConfidence)}</span></h2>
+          <div class="hint" style={{ marginBottom: '8px' }}>Support: how each director leans in a vote, −100 to 100. Confidence is the board’s overall view of you.</div>
           {g.directors.map((d) => {
             const p = g.people[d.personId];
             if (!p) return null;
@@ -131,11 +215,7 @@ export function BoardView() {
                   </div>
                 )}
                 <DivBar value={sup} />
-                <div class="grid2" style={{ marginTop: '10px', gridTemplateColumns: 'repeat(3,1fr)' }}>
-                  <Btn cls="sm" cost={ATTENTION_COST.lobbyDirector} onClick={() => run((s) => lobbyDirector(s, d.personId, 'persuade'))}>Persuade</Btn>
-                  <Btn cls="sm" cost={ATTENTION_COST.lobbyDirector} onClick={() => run((s) => lobbyDirector(s, d.personId, 'favor'))}>Favor</Btn>
-                  <Btn cls="sm warn" cost={ATTENTION_COST.lobbyDirector} onClick={() => run((s) => lobbyDirector(s, d.personId, 'pressure'))}>Pressure</Btn>
-                </div>
+                <Lobby id={d.personId} />
               </div>
             );
           })}
@@ -189,17 +269,17 @@ function Fixer() {
           {kind === 'dirt' && 'Find something on a person. Secrets surface in their file.'}
         </div>
         {kind === 'dirt' ? (
-          personId ? <div>Target: <PersonChip id={personId} /> <a class="link small" onClick={() => setPersonId(null)}>change</a></div>
+          personId ? <div>Target: <PersonChip id={personId} /> <button type="button" class="link small" onClick={() => setPersonId(null)}>change</button></div>
             : <PersonPicker g={g} onPick={setPersonId} />
         ) : (
-          unitId ? <div>Into: <b>{g.units[unitId].name}</b> <a class="link small" onClick={() => setUnitId(null)}>change</a></div>
+          unitId ? <div>Into: <b>{g.units[unitId].name}</b> <button type="button" class="link small" onClick={() => setUnitId(null)}>change</button></div>
             : <UnitPicker g={g} filter={(x) => x !== g.rootUnitId && (kind !== 'materials' || !!g.divisions[x] || !!g.units[x].divisionId)} onPick={setUnitId} />
         )}
         {ready && (
           <>
             <div>
-              <div class="row"><span class="label grow">Budget</span><span class="mono">{formatZuzu(b)}</span></div>
-              <input type="range" min={min} max={Math.max(min * 8, min + 1)} step={Math.max(1000, Math.round(min / 20 / 1000) * 1000)} value={b} onInput={(e) => setBudget(Number(e.currentTarget.value))} />
+              <div class="row"><label class="label grow" for="fixer-budget">Budget</label><span class="mono">{formatZuzu(b)}</span></div>
+              <input id="fixer-budget" type="range" aria-valuetext={formatZuzu(b)} min={min} max={Math.max(min * 8, min + 1)} step={Math.max(1000, Math.round(min / 20 / 1000) * 1000)} value={b} onInput={(e) => setBudget(Number(e.currentTarget.value))} />
             </div>
             <label class="row" style={{ minHeight: '44px' }}>
               <input type="checkbox" checked={clean} onChange={(e) => setClean(e.currentTarget.checked)} style={{ width: 22, height: 22 }} />

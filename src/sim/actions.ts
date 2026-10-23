@@ -106,7 +106,8 @@ const FOR_CAUSE_SHARE = 0.4;
 /** A private threat knocks this much off a plotter's campaign. */
 const THREAT_PLOT_SETBACK = 15;
 
-const FAVOR_COST = 150_000;
+/** What a favor to a director costs the CEO personally. */
+export const FAVOR_COST = 150_000;
 const FAVOR_SWING = 12;
 const PRESSURE_BACKFIRE = -20;
 

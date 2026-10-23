@@ -251,3 +251,18 @@ details > summary { cursor: pointer; padding: 10px 0; color: var(--dim); min-hei
 input::placeholder, textarea::placeholder { color: var(--dim); }
 button.pw { padding: 0; margin: 0; border: 0; border-radius: 50%; background: none; }
 .sheet .hd h2 { display: block; margin: 0; font-size: 16px; letter-spacing: normal; text-transform: none; color: var(--text); }
+
+/* inbox and board */
+.hint.red { color: var(--red); }
+.lobbybtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; margin-top: 10px; }
+.lobby { margin-top: 8px; }
+.lobby > div + div { margin-top: 4px; }
+.lobby b { color: var(--text); font-weight: 600; }
+.squab details { border-top: 1px solid var(--rule); }
+.squab summary { color: var(--text); padding: 6px 0; }
+.squab details > .card { margin: 0 0 8px; }
+.squab > .btn { margin-top: 6px; }
+.pstack { display: flex; flex: none; }
+.pstack > * + * { margin-left: -8px; }
+.agrow.multi { cursor: default; }
+.agrow.multi:active { background: none; }

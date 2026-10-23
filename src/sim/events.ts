@@ -599,12 +599,21 @@ const voices: Partial<Record<InboxKind, Voice>> = {
   feud: (state, d) => {
     const b = at(state, d, 1);
     if (!b) return null;
+    const where = d.unitId ? state.units[d.unitId]?.name : undefined;
     return {
       speaker: at(state, d, 0),
       lines: [
         `Either ${fullName(b)} goes or I stop pretending to work with ${them(b)}.`,
         `I can't get anything done while ${fullName(b)} undermines every decision I make.`,
         `${fullName(b)} has made it personal. I'm done being the adult in the room.`,
+        `Every decision I make${where ? ` in ${where}` : ''} gets reopened by ${fullName(b)}. I can't run work that way.`,
+        `${fullName(b)} and I have been through two rounds of mediation. Neither of us has moved, and the team is losing time.`,
+        `I've kept a record of the last several incidents with ${fullName(b)}. I'd rather not use it, but I will if I have to.`,
+        `${shortName(b)} copies my manager on everything I send. That is a lack of trust, not collaboration.`,
+        `My people are being asked to choose between ${shortName(b)} and me. It needs settling before it reaches the numbers.`,
+        `${shortName(b)} and I disagree about priorities and neither of us will give way. I need a ruling.`,
+        `I won't sign off on anything ${shortName(b)} touches until we agree who owns what.`,
+        `${fullName(b)} is routing work around me. If that is the new arrangement, I'd like to hear it from you.`,
       ],
     };
   },
