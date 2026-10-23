@@ -8,6 +8,109 @@ your own board from replacing you.
 This document is the working design. Sections marked **(open)** still need a
 decision.
 
+## MVP: the internal politics game
+
+The first playable version is only the inside of one corp. Everything after
+this section is the longer-term vision and is **out of the MVP** unless this
+section pulls it in.
+
+### The premise
+
+You are the newly installed CEO of an established zaibatsu with a few
+divisions. Under you is a full hierarchy of generated people who squabble,
+scheme and compete. Keep the company growing and keep the board happy, or
+lose your job.
+
+### The company
+
+- 3–5 **divisions** in different industries. Each has budget, revenue, costs,
+  growth, morale and output.
+- Corp-level numbers: cash, quarterly profit, an abstract share price driven
+  by profit against guidance, and **board confidence**.
+- The outside world is abstract: market conditions, timeline news, and
+  unnamed rival corps that poach staff or make offers. No map, no stock
+  trading, no rival AI.
+
+### The hierarchy
+
+Roughly 40–60 named characters. Below them, staff are just headcount.
+
+- **The board** (5–7): a chair and directors, each with an agenda.
+- **The C-suite:** COO, CFO, Head of Security, Head of Personnel, General
+  Counsel.
+- **Division heads**, one per division.
+- **Deputies and VPs**, 2–3 under each division head and executive.
+
+### Characters
+
+- Name, age, heritage (human, Green, Blighted, uplift, synth), and a generated
+  portrait or icon.
+- Skills: Management, Operations, Finance and Guile.
+- Personality: Loyalty to you, Ambition, Greed, and two traits (principled,
+  paranoid, vain, ruthless and so on).
+- Career: salary, satisfaction, tenure and performance.
+- **Relationships:** an opinion of every character they know, with tags
+  (mentor, protégé, rival, lover, grudge).
+- **Cliques:** informal factions inside the company that back their own people
+  for promotions and lean on the board.
+- **Secrets:** hidden facts (embezzlement, an affair, a pre-hire past, a
+  rival corp's payroll) that can be uncovered and used.
+
+### Your turn (one month)
+
+Your **attention** is limited: a few actions per month. You can:
+
+- **Budget:** allocate capital between divisions.
+- **Personnel:** hire, fire, promote, demote, reassign, set salaries, split the
+  bonus pool and grant stock options.
+- **Meetings:** one-on-ones to build rapport, make promises, threaten, or
+  probe for information. Promises are tracked, and breaking one costs you.
+- **Investigations:** have Security dig into someone.
+- **Board:** lobby individual directors.
+- **Inbox:** rule on requests and events (raise demands, feuds, accusations,
+  resignations, offers from outside).
+- **Fixer requests:** a stripped-down Sinless run (see below).
+
+### What the NPCs do
+
+Every month each character acts according to their traits and relationships.
+They can:
+
+- work, and their performance feeds division output;
+- ask for raises, budget or promotion;
+- take credit or shift blame;
+- undermine a rival;
+- form or break alliances;
+- court board members;
+- leak, embezzle;
+- quit or defect to an outside corp;
+- plot to replace their boss, including you.
+
+Infighting costs output. Loyal, well-placed people make divisions run well.
+
+### Quarters
+
+- Earnings are judged against the guidance you set.
+- The bonus pool is fought over.
+- The board meets. Directors raise motions, such as replacing an executive,
+  cutting a division's budget, or a no-confidence vote in you. Votes follow
+  each director's opinion of you and their ties to whoever is plotting.
+- **Succession:** empty seats get filled from below. Cliques lobby, and
+  passed-over people resent it.
+
+### Fixer requests
+
+A stripped-down run. You ask a fixer to get something: scarce materials
+for a division, a special hire extracted from elsewhere, or dirt on someone.
+You pick the budget and whether it must be clean. A report comes back later
+with the result and any blowback.
+
+### Ending
+
+The game ends if a no-confidence vote passes, or if you retire. Your score
+counts tenure, company growth and your personal fortune, adjusted by how you
+left.
+
 ## Pillars
 
 1. **Running the corp is the game.** Growing subsidiaries, moving money and
