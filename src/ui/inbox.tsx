@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import type { InboxItem } from '../sim/types';
 import { monthLabel } from '../sim/org';
 import { resolveInboxItem } from '../sim/events';
@@ -35,21 +36,30 @@ function Item({ it, done }: { it: InboxItem; done?: boolean }) {
   );
 }
 
+/** Resolved items, collapsed by default. The cards mount only while the section is open. */
+function History({ count }: { count: number }) {
+  const [open, setOpen] = useState(false);
+  const items = open
+    ? game().inbox.filter((i) => i.resolution !== null).sort((a, b) => b.month - a.month).slice(0, 60)
+    : [];
+  return (
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>History ({count})</summary>
+      {items.map((i) => <Item key={i.id} it={i} done />)}
+    </details>
+  );
+}
+
 export function Inbox() {
   const g = game();
   const open = g.inbox.filter((i) => i.resolution === null).sort((a, b) => b.month - a.month);
-  const done = g.inbox.filter((i) => i.resolution !== null).sort((a, b) => b.month - a.month);
+  const doneCount = g.inbox.length - open.length;
   return (
     <div>
       <h2>Needs a decision <span class="mono">{open.length}</span></h2>
       {open.length === 0 && <Empty>Inbox clear.</Empty>}
       {open.map((i) => <Item key={i.id} it={i} />)}
-      {done.length > 0 && (
-        <details>
-          <summary>History ({done.length})</summary>
-          {done.slice(0, 60).map((i) => <Item key={i.id} it={i} done />)}
-        </details>
-      )}
+      {doneCount > 0 && <History count={doneCount} />}
     </div>
   );
 }

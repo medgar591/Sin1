@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import type { GameState } from '../sim/types';
 import { advanceMonth } from '../sim/turn';
 import { formatZuzu, monthLabel } from '../sim/org';
 import { Pips, Sheet, zuzuPrice } from './common';
@@ -10,7 +11,9 @@ import { BoardView, MeetingView } from './board';
 import { MoreView } from './more';
 import { GameOver } from './gameover';
 import { Title } from './title';
-import { closeSheet, commit, openSheet, S, setTab, toast, useStore, type Sheet as SheetT, type Tab } from './store';
+import { closeSheet, commit, errMsg, openSheet, S, setTab, toast, useStore, useToast, type Sheet as SheetT, type Tab } from './store';
+
+const pendingInbox = (g: GameState) => g.inbox.filter((i) => i.resolution === null);
 
 function doEndMonth() {
   const g = S.game;
@@ -20,25 +23,25 @@ function doEndMonth() {
   try {
     advanceMonth(g);
   } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), 'bad');
+    toast(errMsg(e), 'bad');
     commit();
     return;
   }
   S.sheets = [];
   if (!g.gameOver) {
-    const unresolved = g.inbox.filter((i) => i.resolution === null).length;
+    const unresolved = pendingInbox(g).length;
     const reports = g.fixerJobs.filter((j) => pending.has(j.id) && j.state !== 'pending').length;
     const bits = [`${monthLabel(g.month)}.`, unresolved ? `${unresolved} item${unresolved > 1 ? 's' : ''} in the inbox.` : 'Quiet start.'];
     if (reports) bits.push(`${reports} fixer report${reports > 1 ? 's' : ''} in (Board tab).`);
     toast(bits.join(' '));
     if (g.boardMeetings.length > meetings) S.sheets = [{ k: 'boardResult', index: g.boardMeetings.length - 1 }];
   }
-  commit();
+  commit(true);
 }
 
 function endMonthClick() {
   const g = S.game!;
-  const unresolved = g.inbox.filter((i) => i.resolution === null).length;
+  const unresolved = pendingInbox(g).length;
   if (g.player.attentionLeft > 0 || unresolved > 0) openSheet({ k: 'endMonth' });
   else doEndMonth();
 }
@@ -77,7 +80,7 @@ const TABS: [Tab, string][] = [['dash', 'Dash'], ['org', 'Org'], ['inbox', 'Inbo
 
 function TabBar() {
   const g = S.game!;
-  const unresolved = g.inbox.filter((i) => i.resolution === null).length;
+  const unresolved = pendingInbox(g).length;
   return (
     <nav class="tabbar">
       {TABS.map(([t, l]) => (
@@ -93,7 +96,7 @@ function TabBar() {
 
 function EndMonthSheet() {
   const g = S.game!;
-  const unresolved = g.inbox.filter((i) => i.resolution === null).length;
+  const unresolved = pendingInbox(g).length;
   return (
     <Sheet title="End the month?">
       <div class="stack">
@@ -135,6 +138,12 @@ function renderSheet(s: SheetT, i: number) {
   }
 }
 
+function ToastView() {
+  const t = useToast();
+  if (!t) return null;
+  return <div key={t.id} role="status" class={`toast ${t.kind === 'bad' ? 'bad' : ''} ${S.sheets.length ? 'top' : ''}`}>{t.text}</div>;
+}
+
 export function App() {
   useStore();
   if (!S.game) return <Title />;
@@ -151,7 +160,7 @@ export function App() {
       </div>
       <TabBar />
       {S.sheets.map(renderSheet)}
-      {S.toast && <div key={S.toast.id} role="status" class={`toast ${S.toast.kind === 'bad' ? 'bad' : ''} ${S.sheets.length ? 'top' : ''}`}>{S.toast.text}</div>}
+      <ToastView />
     </>
   );
 }

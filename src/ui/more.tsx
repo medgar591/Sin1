@@ -1,9 +1,9 @@
 import { useState } from 'preact/hooks';
-import { exportSave, importSave, saveGame } from '../save';
+import { exportSave, importSave } from '../save';
 import { monthLabel } from '../sim/org';
 import { retire } from '../sim/actions';
 import { Btn, ConfirmBtn, Empty, PersonChip, Primer, Seg } from './common';
-import { game, run, setGame, toast } from './store';
+import { errMsg, game, run, setGame, startGame, toast } from './store';
 
 export function MoreView() {
   const [sub, setSub] = useState<'log' | 'settings'>('log');
@@ -58,7 +58,9 @@ function Settings() {
       </div>
       <div class="card stack">
         <div class="label">Export save</div>
-        <Btn cls="block" onClick={() => setExp(exportSave(g))}>Generate export text</Btn>
+        <Btn cls="block" onClick={async () => {
+          try { setExp(await exportSave(g)); } catch (e) { toast(errMsg(e), 'bad'); }
+        }}>Generate export text</Btn>
         {exp && (
           <>
             <textarea readOnly value={exp} onFocus={(e) => e.currentTarget.select()} />
@@ -80,8 +82,8 @@ function Settings() {
         <div class="label">Import save (replaces this game)</div>
         <textarea value={imp} onInput={(e) => setImp(e.currentTarget.value)} placeholder="Paste exported text" />
         {err && <div class="warnbox">{err}</div>}
-        <ConfirmBtn label="Import" cls="block" onClick={() => {
-          try { const s = importSave(imp); saveGame(s); setGame(s); toast('Save imported.'); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+        <ConfirmBtn label="Import" cls="block" onClick={async () => {
+          try { startGame(await importSave(imp)); toast('Save imported.'); } catch (e) { setErr(errMsg(e)); }
         }} />
       </div>
       <div class="card stack">

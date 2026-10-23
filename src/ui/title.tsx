@@ -2,9 +2,9 @@ import { useState } from 'preact/hooks';
 import type { Pronouns } from '../sim/types';
 import { generateGame } from '../sim/generate';
 import { COMPANY_NAME_SUGGESTIONS } from '../sim/data/names';
-import { clearSave, hasSave, importSave, loadGame, saveGame } from '../save';
+import { clearSave, hasSave, importSave, loadGame } from '../save';
 import { Seg } from './common';
-import { setGame } from './store';
+import { errMsg, setGame, startGame } from './store';
 
 function hashSeed(text: string): number {
   const t = text.trim();
@@ -26,7 +26,7 @@ export function Title() {
   const [seed, setSeed] = useState('');
   const [text, setText] = useState('');
   const [err, setErr] = useState('');
-  const saved = hasSave();
+  const [saved, setSaved] = useState(hasSave);
 
   const start = () => {
     setErr('');
@@ -37,10 +37,9 @@ export function Title() {
         playerLastName: last.trim() || 'Morrow',
         playerPronouns: pro,
       });
-      saveGame(g);
-      setGame(g);
+      startGame(g);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errMsg(e));
     }
   };
 
@@ -70,7 +69,7 @@ export function Title() {
           <button class={`btn block ${saved ? '' : 'primary'}`} onClick={() => setView('new')}>New game</button>
           <button class="btn block" onClick={() => setView('import')}>Import save</button>
           {saved && (
-            <button class="btn sm block" onClick={() => { clearSave(); setView('main'); setErr('Saved game deleted.'); }}>
+            <button class="btn sm block" onClick={() => { clearSave(); setSaved(false); setView('main'); setErr('Saved game deleted.'); }}>
               Delete saved game
             </button>
           )}
@@ -125,13 +124,11 @@ export function Title() {
           {err && <div class="warnbox">{err}</div>}
           <button
             class="btn primary block"
-            onClick={() => {
+            onClick={async () => {
               try {
-                const g = importSave(text);
-                saveGame(g);
-                setGame(g);
+                startGame(await importSave(text));
               } catch (e) {
-                setErr(e instanceof Error ? e.message : String(e));
+                setErr(errMsg(e));
               }
             }}
           >

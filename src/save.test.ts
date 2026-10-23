@@ -90,6 +90,16 @@ describe('localStorage round trip', () => {
     expect(loadGame()).toBeNull();
   });
 
+  it('keeps hasSave cheap: the marker answers without reading the save', () => {
+    saveGame(sample());
+    const ls = g.localStorage as MemoryStorage;
+    const get = ls.getItem.bind(ls);
+    const reads: string[] = [];
+    ls.getItem = (k: string) => (reads.push(k), get(k));
+    expect(hasSave()).toBe(true);
+    expect(reads).toEqual(['sin1.save.v1.present']);
+  });
+
   it('returns null when stored JSON lacks the game shape', () => {
     (g.localStorage as MemoryStorage).setItem('sin1.save.v1', JSON.stringify({ version: 1 }));
     expect(loadGame()).toBeNull();
@@ -146,67 +156,108 @@ describe('storage failures never throw', () => {
   });
 });
 
+/** The old uncompressed format: base64 of the UTF-8 JSON. */
+const b64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''));
+const legacyCode = (state: unknown) => b64(new TextEncoder().encode(JSON.stringify(state)));
+
+const BAD = /doesn't look like a Sin1 save/;
+
 describe('export and import', () => {
-  it('round-trips through the export string', () => {
+  it('exports the compressed format and round-trips it', async () => {
     const state = sample();
-    const code = exportSave(state);
-    expect(typeof code).toBe('string');
-    expect(code).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
-    expect(importSave(code)).toEqual(state);
+    const code = await exportSave(state);
+    expect(code).toMatch(/^SIN1Z:[A-Za-z0-9+/]+={0,2}$/);
+    expect(code.length).toBeLessThan(JSON.stringify(state).length / 2);
+    expect(await importSave(code)).toEqual(state);
   });
 
-  it('preserves unicode names exactly', () => {
+  it('imports the legacy uncompressed base64 format', async () => {
+    const state = sample();
+    expect(await importSave(legacyCode(state))).toEqual(state);
+  });
+
+  it('imports raw JSON', async () => {
+    const state = sample();
+    expect(await importSave(JSON.stringify(state))).toEqual(state);
+    expect(await importSave(`\n  ${JSON.stringify(state, null, 2)}  \n`)).toEqual(state);
+  });
+
+  it('preserves unicode names exactly', async () => {
     const state = sample();
     state.people[state.player.personId]!.firstName = 'ㄓ鄭 Zoë 🦅';
-    const round = importSave(exportSave(state));
-    expect(round.people[state.player.personId]!.firstName).toBe('ㄓ鄭 Zoë 🦅');
-    expect(round).toEqual(state);
+    for (const code of [await exportSave(state), legacyCode(state)]) {
+      const round = await importSave(code);
+      expect(round.people[state.player.personId]!.firstName).toBe('ㄓ鄭 Zoë 🦅');
+      expect(round).toEqual(state);
+    }
   });
 
-  it('accepts an export string with surrounding whitespace and line breaks', () => {
+  it('accepts a code with surrounding whitespace and line breaks', async () => {
     const state = sample();
-    const code = exportSave(state);
-    const wrapped = `  ${code.slice(0, 20)}\n${code.slice(20, 60)}\r\n${code.slice(60)}  \n`;
-    expect(importSave(wrapped)).toEqual(state);
+    for (const code of [await exportSave(state), legacyCode(state)]) {
+      const wrapped = `  ${code.slice(0, 20)}\n${code.slice(20, 60)}\r\n${code.slice(60)}  \n`;
+      expect(await importSave(wrapped)).toEqual(state);
+    }
   });
 
-  it('accepts raw JSON', () => {
+  it('falls back to the plain format when CompressionStream is missing', async () => {
     const state = sample();
-    expect(importSave(JSON.stringify(state))).toEqual(state);
-    expect(importSave(`\n  ${JSON.stringify(state, null, 2)}  \n`)).toEqual(state);
+    const real = globalThis.CompressionStream;
+    // @ts-expect-error simulating an older browser
+    delete globalThis.CompressionStream;
+    try {
+      const code = await exportSave(state);
+      expect(code.startsWith('SIN1Z:')).toBe(false);
+      expect(await importSave(code)).toEqual(state);
+    } finally {
+      globalThis.CompressionStream = real;
+    }
   });
 
-  it('rejects empty input', () => {
-    expect(() => importSave('')).toThrow(/Paste a save code/);
-    expect(() => importSave('   \n\t ')).toThrow(/Paste a save code/);
+  it('explains when a compressed code cannot be read', async () => {
+    const code = await exportSave(sample());
+    const real = globalThis.DecompressionStream;
+    // @ts-expect-error simulating an older browser
+    delete globalThis.DecompressionStream;
+    try {
+      await expect(importSave(code)).rejects.toThrow(/cannot read compressed saves/);
+    } finally {
+      globalThis.DecompressionStream = real;
+    }
   });
 
-  it('rejects garbage with a friendly message', () => {
-    expect(() => importSave('hello world!!')).toThrow(/doesn't look like a Sin1 save/);
-    expect(() => importSave('abc')).toThrow(/doesn't look like a Sin1 save/);
-    expect(() => importSave('{"not":"a save"')).toThrow(/doesn't look like a Sin1 save/);
+  it('rejects empty input', async () => {
+    await expect(importSave('')).rejects.toThrow(/Paste a save code/);
+    await expect(importSave('   \n\t ')).rejects.toThrow(/Paste a save code/);
   });
 
-  it('rejects valid base64 that is not a save', () => {
-    const code = btoa(JSON.stringify({ hello: 'world' }));
-    expect(() => importSave(code)).toThrow(/doesn't look like a Sin1 save/);
+  it('rejects garbage with a friendly message', async () => {
+    await expect(importSave('hello world!!')).rejects.toThrow(BAD);
+    await expect(importSave('abc')).rejects.toThrow(BAD);
+    await expect(importSave('{"not":"a save"')).rejects.toThrow(BAD);
+    await expect(importSave('SIN1Z:')).rejects.toThrow(BAD);
+    await expect(importSave('SIN1Z:aGVsbG8=')).rejects.toThrow(BAD); // base64, but not gzip
   });
 
-  it('rejects a truncated export string', () => {
-    const code = exportSave(sample());
-    expect(() => importSave(code.slice(0, code.length - 7))).toThrow(Error);
+  it('rejects valid base64 that is not a save', async () => {
+    await expect(importSave(btoa(JSON.stringify({ hello: 'world' })))).rejects.toThrow(BAD);
   });
 
-  it('rejects invalid UTF-8 inside valid base64', () => {
-    const bytes = new Uint8Array([0xff, 0xfe, 0xfd, 0x80]);
-    let binary = '';
-    for (const b of bytes) binary += String.fromCharCode(b);
-    expect(() => importSave(btoa(binary))).toThrow(/doesn't look like a Sin1 save/);
+  it('rejects truncated codes', async () => {
+    for (const code of [await exportSave(sample()), legacyCode(sample())]) {
+      await expect(importSave(code.slice(0, code.length - 7))).rejects.toThrow(Error);
+    }
   });
 
-  it('rejects a save from another version with a version message', () => {
+  it('rejects invalid UTF-8 inside valid base64', async () => {
+    const code = b64(new Uint8Array([0xff, 0xfe, 0xfd, 0x80]));
+    await expect(importSave(code)).rejects.toThrow(BAD);
+  });
+
+  it('rejects a save from another version with a version message', async () => {
     const state = { ...sample(), version: 2 };
-    expect(() => importSave(JSON.stringify(state))).toThrow(/different version/);
-    expect(() => importSave(exportSave(state as unknown as GameState))).toThrow(/different version/);
+    await expect(importSave(JSON.stringify(state))).rejects.toThrow(/different version/);
+    await expect(importSave(legacyCode(state))).rejects.toThrow(/different version/);
+    await expect(importSave(await exportSave(state as unknown as GameState))).rejects.toThrow(/different version/);
   });
 });
